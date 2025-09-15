@@ -1,0 +1,36 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# Entornos
+.venv/
+venv/
+env/
+ENV/
+
+# IDE/OS
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Logs & cachés
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Base de datos y archivos locales
+*.db
+*.sqlite3
+backend/instance/*.db
+
+# Variables de entorno / secretos
+.env
+.env.*
