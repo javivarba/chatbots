@@ -8,7 +8,7 @@ from datetime import datetime
 # URL del webhook local
 WEBHOOK_URL = "http://localhost:5000/webhooks/whatsapp/webhook"
 
-def simulate_whatsapp_message(message, from_number="+50688881234", name="Test User"):
+def simulate_whatsapp_message(message, from_number="+50670036654", name="BJJ Mingo"):
     """
     Simula un mensaje de WhatsApp enviado al webhook
     """
