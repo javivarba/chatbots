@@ -1,0 +1,33 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# Entornos
+.venv/
+venv/
+env/
+ENV/
+
+# IDE/OS
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Logs & caches
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Bases de datos y secretos
+*.db
+*.sqlite3
+.env
+.env.*
