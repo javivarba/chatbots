@@ -1,4 +1,4 @@
-﻿# test_openai.py
+# test_openai.py
 import os
 import sys
 from openai import OpenAI

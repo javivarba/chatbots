@@ -1,66 +1,61 @@
-from flask import Flask, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-from flask_cors import CORS
-import logging
+from flask import Flask, jsonify, request, render_template
+from twilio.twiml.messaging_response import MessagingResponse
+from app.api.dashboard_routes import dashboard_bp
+from app.services.message_handler import MessageHandler
+import os
 
-db = SQLAlchemy()
-migrate = Migrate()
-
-# Configurar logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-
-def create_app(config_name="default"):
-    """Application factory pattern"""
+def create_app(config_name='default'):
     app = Flask(__name__)
     
-    # Load configuration
-    from .config import config
-    app.config.from_object(config[config_name])
+    # Configuración básica
+    app.config['SECRET_KEY'] = 'dev-secret-key'
     
-    # Initialize extensions
-    db.init_app(app)
-    migrate.init_app(app, db)
-    CORS(app)
+    # Inicializar message handler
+    message_handler = MessageHandler()
     
-    # Import models (importante para que SQLAlchemy los reconozca)
-    from app import models
-    
-    # Register webhooks blueprint
-    from app.api.webhooks import webhook_bp
-    app.register_blueprint(webhook_bp, url_prefix="/webhooks")
-    
-    # Health and info routes
-    @app.route("/")
-    def index():
-        return jsonify({
-            "name": "BJJ Academy Bot API",
-            "version": "1.0.0",
-            "status": "running",
-            "endpoints": {
-                "health": "/health",
-                "webhooks": {
-                    "whatsapp": "/webhooks/whatsapp/webhook",
-                    "test": "/webhooks/whatsapp/test"
-                }
-            }
-        })
-    
-    @app.route("/health")
-    def health():
-        try:
-            # Test database connection
-            db.session.execute("SELECT 1")
-            db_status = "connected"
-        except:
-            db_status = "disconnected"
+    # Ruta raíz para Twilio
+    @app.route('/', methods=['GET', 'POST'])
+    def root():
+        """Ruta raíz que Twilio busca"""
+        if request.method == 'POST':
+            # Obtener datos del mensaje
+            incoming_msg = request.values.get('Body', '').strip()
+            from_number = request.values.get('From', '').replace('whatsapp:', '')
+            sender_name = request.values.get('ProfileName', '')
             
-        return jsonify({
-            "status": "healthy",
-            "database": db_status
-        })
+            print(f"📱 Mensaje de {from_number}: {incoming_msg}")
+            
+            # Procesar mensaje y guardar en BD
+            response_text = message_handler.process_message(
+                from_number, 
+                incoming_msg, 
+                sender_name
+            )
+            
+            # Crear respuesta de Twilio
+            resp = MessagingResponse()
+            resp.message(response_text)
+            
+            return str(resp)
+        else:
+            return jsonify({'status': 'active', 'webhook': 'ready'})
+    
+    # Health endpoint
+    @app.route('/health')
+    def health():
+        return jsonify({'status': 'healthy', 'message': 'Server is running'})
+    
+    # Webhook alternativo
+    @app.route('/webhook/whatsapp', methods=['GET', 'POST'])
+    def whatsapp_webhook():
+        return root()
+    
+    # Dashboard route
+    @app.route('/dashboard')
+    def dashboard():
+        return render_template('dashboard.html')
+    
+    # Registrar blueprint del dashboard
+    app.register_blueprint(dashboard_bp)
     
     return app

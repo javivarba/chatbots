@@ -3,7 +3,7 @@ Message Processor Service con integración de OpenAI
 """
 
 from app.models import Lead, Conversation, Academy
-from app.services.ai_service import AIService
+from backend.app.services.openai_service import AIService
 from datetime import datetime
 import re
 import logging

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BJJ Academy - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .status-new { background-color: #e0e7ff; color: #3730a3; }
+        .status-interested { background-color: #fef3c7; color: #92400e; }
+        .status-scheduled { background-color: #d1fae5; color: #065f46; }
+        .status-confirmed { background-color: #cffafe; color: #0c4a6e; }
+        .status-cancelled { background-color: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Header -->
+    <div class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex justify-between items-center py-4">
+                <h1 class="text-2xl font-bold">🥋 BJJ Academy Dashboard</h1>
+                <div class="flex gap-4">
+                    <button onclick="showSection('stats')" id="btn-stats"
+                            class="px-4 py-2 rounded hover:bg-gray-100 font-medium bg-blue-100">
+                        📊 Estadísticas
+                    </button>
+                    <button onclick="showSection('appointments')" id="btn-appointments"
+                            class="px-4 py-2 rounded hover:bg-gray-100 font-medium">
+                        📅 Citas
+                    </button>
+                    <button onclick="refreshData()" 
+                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                        🔄 Actualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Section -->
+    <div id="stats-section" class="max-w-7xl mx-auto px-4 mt-8">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6" id="stats-container">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="text-gray-500 text-sm">Cargando...</div>
+            </div>
+        </div>
+
+        <div class="mt-8 bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b">
+                <h2 class="text-lg font-semibold">Leads Recientes</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left">Nombre</th>
+                            <th class="px-6 py-3 text-left">Teléfono</th>
+                            <th class="px-6 py-3 text-left">Estado</th>
+                            <th class="px-6 py-3 text-left">Interés</th>
+                            <th class="px-6 py-3 text-left">Mensajes</th>
+                            <th class="px-6 py-3 text-left">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leads-tbody">
+                        <tr><td colspan="6" class="px-6 py-4 text-center">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Appointments Section -->
+    <div id="appointments-section" class="max-w-7xl mx-auto px-4 mt-8 hidden">
+        <div class="bg-white rounded-lg shadow mb-6">
+            <div class="px-6 py-4 border-b bg-blue-50">
+                <h2 class="text-lg font-semibold">📅 Citas de Hoy</h2>
+            </div>
+            <div id="today-appointments" class="p-6">
+                <p class="text-gray-500">Cargando...</p>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b">
+                <h2 class="text-lg font-semibold">📋 Todas las Citas</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left">Fecha y Hora</th>
+                            <th class="px-6 py-3 text-left">Nombre</th>
+                            <th class="px-6 py-3 text-left">Teléfono</th>
+                            <th class="px-6 py-3 text-left">Estado</th>
+                            <th class="px-6 py-3 text-left">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appointments-tbody">
+                        <tr><td colspan="5" class="px-6 py-4 text-center">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="conversation-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] flex flex-col">
+            <div class="px-6 py-4 border-b flex justify-between items-center">
+                <h3 class="text-lg font-semibold">Conversación</h3>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 text-2xl">✕</button>
+            </div>
+            <div id="conversation-content" class="flex-1 overflow-y-auto p-6"></div>
+        </div>
+    </div>
+
+    <script>
+        // Dashboard JavaScript
+        let currentSection = 'stats';
+
+        function showSection(section) {
+            currentSection = section;
+            document.getElementById('stats-section').classList.toggle('hidden', section !== 'stats');
+            document.getElementById('appointments-section').classList.toggle('hidden', section !== 'appointments');
+            
+            document.getElementById('btn-stats').classList.toggle('bg-blue-100', section === 'stats');
+            document.getElementById('btn-appointments').classList.toggle('bg-blue-100', section === 'appointments');
+            
+            if (section === 'appointments') {
+                loadAppointments();
+                loadTodayAppointments();
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                
+                document.getElementById('stats-container').innerHTML = `
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <div class="text-gray-500 text-sm">Total Leads</div>
+                        <div class="text-3xl font-bold text-blue-600">${data.total_leads || 0}</div>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <div class="text-gray-500 text-sm">Interesados</div>
+                        <div class="text-3xl font-bold text-green-600">${data.interested || 0}</div>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <div class="text-gray-500 text-sm">Agendados</div>
+                        <div class="text-3xl font-bold text-purple-600">${data.scheduled || 0}</div>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <div class="text-gray-500 text-sm">Conversión</div>
+                        <div class="text-3xl font-bold text-yellow-600">${data.conversion_rate || 0}%</div>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error cargando stats:', error);
+                document.getElementById('stats-container').innerHTML = '<div class="text-red-500">Error cargando estadísticas</div>';
+            }
+        }
+
+        async function loadLeads() {
+            try {
+                const response = await fetch('/api/leads');
+                const leads = await response.json();
+                
+                const tbody = document.getElementById('leads-tbody');
+                if (leads.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center">No hay leads</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = leads.map(lead => `
+                    <tr class="hover:bg-gray-50 border-t">
+                        <td class="px-6 py-4">${lead.name}</td>
+                        <td class="px-6 py-4">${lead.phone}</td>
+                        <td class="px-6 py-4">
+                            <span class="px-2 py-1 rounded text-xs status-${lead.status}">${lead.status}</span>
+                        </td>
+                        <td class="px-6 py-4">${'⭐'.repeat(Math.min(lead.interest_level || 0, 5))}</td>
+                        <td class="px-6 py-4">${lead.messages || 0}</td>
+                        <td class="px-6 py-4">
+                            <button onclick="viewConversation(${lead.id})" class="text-blue-600 hover:underline">Ver Chat</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Error cargando leads:', error);
+                document.getElementById('leads-tbody').innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-red-500">Error cargando leads</td></tr>';
+            }
+        }
+
+        async function loadAppointments() {
+            try {
+                const response = await fetch('/api/appointments');
+                const appointments = await response.json();
+                
+                const tbody = document.getElementById('appointments-tbody');
+                if (!appointments || appointments.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center">No hay citas agendadas</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = appointments.map(apt => {
+                    const dt = new Date(apt.datetime);
+                    const dateStr = dt.toLocaleDateString('es-MX');
+                    const timeStr = dt.toLocaleTimeString('es-MX', {hour: '2-digit', minute:'2-digit'});
+                    
+                    return `
+                        <tr class="hover:bg-gray-50 border-t">
+                            <td class="px-6 py-4">${dateStr} ${timeStr}</td>
+                            <td class="px-6 py-4">${apt.lead_name}</td>
+                            <td class="px-6 py-4">${apt.lead_phone}</td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-1 rounded text-xs status-${apt.status}">${apt.status}</span>
+                            </td>
+                            <td class="px-6 py-4">
+                                ${apt.status === 'scheduled' ? 
+                                    `<button onclick="confirmAppointment(${apt.id})" class="text-green-600 hover:text-green-800 mr-2">✅</button>` : ''}
+                                <button onclick="cancelAppointment(${apt.id})" class="text-red-600 hover:text-red-800">❌</button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Error cargando appointments:', error);
+                document.getElementById('appointments-tbody').innerHTML = '<tr><td colspan="5" class="text-center text-red-500">Error cargando citas</td></tr>';
+            }
+        }
+
+        async function loadTodayAppointments() {
+            try {
+                const response = await fetch('/api/appointments/today');
+                const appointments = await response.json();
+                
+                const container = document.getElementById('today-appointments');
+                if (!appointments || appointments.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500">No hay citas para hoy</p>';
+                    return;
+                }
+                
+                container.innerHTML = appointments.map(apt => `
+                    <div class="border rounded-lg p-4 mb-2 ${apt.confirmed ? 'bg-green-50' : 'bg-yellow-50'}">
+                        <div class="flex justify-between">
+                            <div>
+                                <p class="font-semibold">${apt.time} - ${apt.lead_name}</p>
+                                <p class="text-sm text-gray-600">📱 ${apt.lead_phone}</p>
+                            </div>
+                            <span class="px-3 py-1 rounded-full text-xs status-${apt.status}">${apt.status}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error cargando citas de hoy:', error);
+            }
+        }
+
+        async function viewConversation(leadId) {
+            try {
+                const response = await fetch(`/api/leads/${leadId}`);
+                const data = await response.json();
+                
+                const content = document.getElementById('conversation-content');
+                content.innerHTML = `
+                    <div class="mb-4">
+                        <p class="font-semibold">${data.lead.name || 'Sin nombre'}</p>
+                        <p class="text-sm text-gray-500">${data.lead.phone}</p>
+                    </div>
+                    <div class="space-y-4">
+                        ${data.messages.map(msg => `
+                            <div class="${msg.sender === 'user' ? 'text-right' : 'text-left'}">
+                                <div class="inline-block max-w-xs px-4 py-2 rounded-lg ${
+                                    msg.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200'
+                                }">
+                                    <p>${msg.content}</p>
+                                    <p class="text-xs mt-1 opacity-70">${new Date(msg.timestamp).toLocaleString('es-MX')}</p>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                
+                document.getElementById('conversation-modal').classList.remove('hidden');
+            } catch (error) {
+                console.error('Error cargando conversación:', error);
+                alert('Error al cargar la conversación');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('conversation-modal').classList.add('hidden');
+        }
+
+        async function confirmAppointment(id) {
+            try {
+                await fetch(`/api/appointments/${id}/confirm`, {method: 'POST'});
+                loadAppointments();
+                loadTodayAppointments();
+            } catch (error) {
+                console.error('Error confirmando cita:', error);
+            }
+        }
+
+        async function cancelAppointment(id) {
+            if (!confirm('¿Seguro que quieres cancelar esta cita?')) return;
+            try {
+                await fetch(`/api/appointments/${id}/cancel`, {method: 'POST'});
+                loadAppointments();
+                loadTodayAppointments();
+            } catch (error) {
+                console.error('Error cancelando cita:', error);
+            }
+        }
+
+        function refreshData() {
+            if (currentSection === 'stats') {
+                loadStats();
+                loadLeads();
+            } else {
+                loadAppointments();
+                loadTodayAppointments();
+            }
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Dashboard cargando...');
+            refreshData();
+            // Auto refresh every 10 seconds
+            setInterval(refreshData, 10000);
+        });
+    </script>
+</body>
+</html>

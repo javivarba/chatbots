@@ -1,4 +1,24 @@
-# BJJ Academy WhatsApp Bot 🥋
+#!/usr/bin/env python3
+"""
+Crear README.md profesional para el proyecto
+"""
+
+from pathlib import Path
+from datetime import datetime
+
+def create_readme():
+    """Crear README.md completo"""
+    
+    # Determinar ruta
+    current_path = Path.cwd()
+    if current_path.name == 'backend':
+        readme_path = current_path.parent / 'README.md'
+    else:
+        readme_path = current_path / 'README.md'
+    
+    print(f"📝 Creando README.md en: {readme_path}")
+    
+    readme_content = '''# BJJ Academy WhatsApp Bot 🥋
 
 > Sistema automatizado de gestión de leads y agendamiento de clases para academias de Brazilian Jiu-Jitsu
 
@@ -52,7 +72,7 @@ cd bjj-academy-bot
 python -m venv venv
 
 # En Windows:
-venv\Scripts\activate
+venv\\Scripts\\activate
 
 # En Mac/Linux:
 source venv/bin/activate
@@ -172,7 +192,7 @@ curl http://localhost:5000/health
 curl http://localhost:5000/api/stats
 
 # 3. Simular mensaje WhatsApp
-curl -X POST http://localhost:5000/webhook/whatsapp \
+curl -X POST http://localhost:5000/webhook/whatsapp \\
   -d "Body=Hola&From=whatsapp:+521234567890"
 ```
 
@@ -281,3 +301,173 @@ Este proyecto está bajo la Licencia MIT - ver archivo [LICENSE](LICENSE) para d
 ---
 
 **Desarrollado con ❤️ para BJJ Academy | Septiembre 2024**
+'''
+    
+    # Guardar README
+    with open(readme_path, 'w', encoding='utf-8') as f:
+        f.write(readme_content)
+    
+    print(f"✅ README.md creado exitosamente!")
+    
+    # Crear también .env.example
+    create_env_example(readme_path.parent)
+    
+    # Crear requirements.txt actualizado
+    create_requirements(readme_path.parent / 'backend')
+    
+    # Crear .gitignore
+    create_gitignore(readme_path.parent)
+    
+    return True
+
+def create_env_example(project_root):
+    """Crear archivo .env.example"""
+    
+    env_example_path = project_root / 'backend' / '.env.example'
+    
+    env_content = '''# Flask Configuration
+FLASK_ENV=development
+FLASK_DEBUG=True
+SECRET_KEY=your-secret-key-here-change-in-production
+
+# OpenAI Configuration (Optional but recommended)
+OPENAI_API_KEY=sk-your-openai-api-key-here
+
+# Twilio Configuration
+TWILIO_ACCOUNT_SID=your-twilio-account-sid
+TWILIO_AUTH_TOKEN=your-twilio-auth-token
+TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
+
+# Database (Optional - defaults to SQLite)
+DATABASE_URL=sqlite:///bjj_academy.db
+
+# Application Settings
+APP_NAME=BJJ Academy Bot
+APP_VERSION=1.0.0
+MAX_CONVERSATION_HISTORY=10
+'''
+    
+    with open(env_example_path, 'w', encoding='utf-8') as f:
+        f.write(env_content)
+    
+    print(f"✅ .env.example creado")
+
+def create_requirements(backend_path):
+    """Crear requirements.txt actualizado"""
+    
+    req_path = backend_path / 'requirements.txt'
+    
+    requirements = '''Flask==2.3.3
+flask-cors==4.0.0
+python-dotenv==1.0.0
+requests==2.31.0
+twilio==8.5.0
+openai==0.28.0
+SQLAlchemy==2.0.20
+colorama==0.4.6
+Werkzeug==2.3.7
+'''
+    
+    with open(req_path, 'w', encoding='utf-8') as f:
+        f.write(requirements)
+    
+    print(f"✅ requirements.txt actualizado")
+
+def create_gitignore(project_root):
+    """Crear .gitignore"""
+    
+    gitignore_path = project_root / '.gitignore'
+    
+    gitignore_content = '''# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Flask
+instance/
+.webassets-cache
+
+# Environment
+.env
+*.env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Backups
+*.backup
+*.bak
+
+# Old scripts
+_old_scripts/
+
+# Ngrok
+ngrok.exe
+ngrok
+'''
+    
+    with open(gitignore_path, 'w', encoding='utf-8') as f:
+        f.write(gitignore_content)
+    
+    print(f"✅ .gitignore creado")
+
+if __name__ == "__main__":
+    print("="*60)
+    print("CREANDO ARCHIVOS DE DOCUMENTACIÓN")
+    print("="*60)
+    
+    if create_readme():
+        print("\n" + "="*60)
+        print("✅ DOCUMENTACIÓN CREADA")
+        print("="*60)
+        
+        print("\n📁 Archivos creados:")
+        print("  • README.md")
+        print("  • .env.example")
+        print("  • requirements.txt")
+        print("  • .gitignore")
+        
+        print("\n🚀 PRÓXIMOS PASOS:")
+        print("\n1. Actualiza el README con tu información:")
+        print("   - Tu nombre y contacto")
+        print("   - URL del repositorio")
+        print("   - Información de la academia")
+        
+        print("\n2. Sube a GitHub:")
+        print("   git add .")
+        print("   git commit -m 'feat: BJJ Academy WhatsApp Bot - Sistema completo'")
+        print("   git checkout -b production")
+        print("   git push origin production")
+        
+        print("\n3. Graba video de demostración mostrando:")
+        print("   - Conversación por WhatsApp")
+        print("   - Agendamiento de clase")
+        print("   - Dashboard administrativo")
+        
+        print("\n✨ PROYECTO LISTO PARA ENTREGAR!")

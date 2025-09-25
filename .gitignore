@@ -1,36 +1,52 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.egg-info/
-.eggs/
-
-# Entornos
-.venv/
+*$py.class
+*.so
+.Python
 venv/
 env/
 ENV/
 
-# IDE/OS
+# Flask
+instance/
+.webassets-cache
+
+# Environment
+.env
+*.env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
 .vscode/
 .idea/
-*.code-workspace
+*.swp
+*.swo
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Logs & cachés
+# Logs
 *.log
+logs/
+
+# Testing
+.coverage
+htmlcov/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.cache/
 
-# Base de datos y archivos locales
-*.db
-*.sqlite3
-backend/instance/*.db
+# Backups
+*.backup
+*.bak
 
-# Variables de entorno / secretos
-.env
-.env.*
+# Old scripts
+_old_scripts/
+
+# Ngrok
+ngrok.exe
+ngrok
