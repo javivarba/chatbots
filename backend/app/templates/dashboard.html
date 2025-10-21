@@ -7,329 +7,481 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .status-new { background-color: #e0e7ff; color: #3730a3; }
-        .status-interested { background-color: #fef3c7; color: #92400e; }
-        .status-scheduled { background-color: #d1fae5; color: #065f46; }
-        .status-confirmed { background-color: #cffafe; color: #0c4a6e; }
-        .status-cancelled { background-color: #fee2e2; color: #991b1b; }
+        .status-contacted { background-color: #fef3c7; color: #92400e; }
+        .status-interested { background-color: #d1fae5; color: #065f46; }
+        .status-scheduled { background-color: #cffafe; color: #0c4a6e; }
+        .status-engaged { background-color: #fce7f3; color: #831843; }
+        
+        .priority-urgent { background-color: #fee2e2; color: #991b1b; border-left: 4px solid #dc2626; }
+        .priority-high { background-color: #fef3c7; color: #92400e; border-left: 4px solid #f59e0b; }
+        .priority-medium { background-color: #dbeafe; color: #1e40af; border-left: 4px solid #3b82f6; }
+        .priority-low { background-color: #f3f4f6; color: #4b5563; border-left: 4px solid #9ca3af; }
+        
+        .action-button {
+            transition: all 0.2s;
+        }
+        .action-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
     </style>
 </head>
 <body class="bg-gray-50">
     <!-- Header -->
     <div class="bg-white shadow-sm border-b">
-        <div class="max-w-7xl mx-auto px-4">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center py-4">
-                <h1 class="text-2xl font-bold">🥋 BJJ Academy Dashboard</h1>
-                <div class="flex gap-4">
-                    <button onclick="showSection('stats')" id="btn-stats"
-                            class="px-4 py-2 rounded hover:bg-gray-100 font-medium bg-blue-100">
-                        📊 Estadísticas
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900">BJJ Academy Dashboard</h1>
+                    <p class="text-sm text-gray-500 mt-1">Gestión de leads y seguimiento</p>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="toggleFilter('needs_followup')" 
+                            id="filter-followup"
+                            class="px-4 py-2 rounded border hover:bg-gray-50">
+                        🔔 Necesitan seguimiento
                     </button>
-                    <button onclick="showSection('appointments')" id="btn-appointments"
-                            class="px-4 py-2 rounded hover:bg-gray-100 font-medium">
-                        📅 Citas
-                    </button>
-                    <button onclick="refreshData()" 
-                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
-                        🔄 Actualizar
+                    <button onclick="refreshData()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                        Actualizar
                     </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Stats Section -->
-    <div id="stats-section" class="max-w-7xl mx-auto px-4 mt-8">
+    <!-- Stats Cards -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6" id="stats-container">
             <div class="bg-white p-6 rounded-lg shadow">
-                <div class="text-gray-500 text-sm">Cargando...</div>
+                <div class="text-gray-500 text-sm">Total Leads</div>
+                <div class="text-3xl font-bold">-</div>
             </div>
-        </div>
-
-        <div class="mt-8 bg-white rounded-lg shadow">
-            <div class="px-6 py-4 border-b">
-                <h2 class="text-lg font-semibold">Leads Recientes</h2>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="text-gray-500 text-sm">Con Cita Agendada</div>
+                <div class="text-3xl font-bold">-</div>
             </div>
-            <div class="overflow-x-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-6 py-3 text-left">Nombre</th>
-                            <th class="px-6 py-3 text-left">Teléfono</th>
-                            <th class="px-6 py-3 text-left">Estado</th>
-                            <th class="px-6 py-3 text-left">Interés</th>
-                            <th class="px-6 py-3 text-left">Mensajes</th>
-                            <th class="px-6 py-3 text-left">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody id="leads-tbody">
-                        <tr><td colspan="6" class="px-6 py-4 text-center">Cargando...</td></tr>
-                    </tbody>
-                </table>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="text-gray-500 text-sm">Necesitan Seguimiento</div>
+                <div class="text-3xl font-bold">-</div>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="text-gray-500 text-sm">Tasa de Conversión</div>
+                <div class="text-3xl font-bold">-%</div>
             </div>
         </div>
     </div>
 
-    <!-- Appointments Section -->
-    <div id="appointments-section" class="max-w-7xl mx-auto px-4 mt-8 hidden">
-        <div class="bg-white rounded-lg shadow mb-6">
-            <div class="px-6 py-4 border-b bg-blue-50">
-                <h2 class="text-lg font-semibold">📅 Citas de Hoy</h2>
-            </div>
-            <div id="today-appointments" class="p-6">
-                <p class="text-gray-500">Cargando...</p>
+    <!-- Filtros rápidos -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+        <div class="bg-white rounded-lg shadow p-4">
+            <div class="flex gap-2 flex-wrap">
+                <button onclick="filterByStatus(null)" 
+                        class="filter-btn px-4 py-2 rounded border hover:bg-gray-50 active">
+                    Todos
+                </button>
+                <button onclick="filterByStatus('new')" 
+                        class="filter-btn px-4 py-2 rounded border hover:bg-gray-50">
+                    Nuevos
+                </button>
+                <button onclick="filterByStatus('contacted')" 
+                        class="filter-btn px-4 py-2 rounded border hover:bg-gray-50">
+                    Contactados
+                </button>
+                <button onclick="filterByStatus('interested')" 
+                        class="filter-btn px-4 py-2 rounded border hover:bg-gray-50">
+                    Interesados
+                </button>
+                <button onclick="filterByStatus('scheduled')" 
+                        class="filter-btn px-4 py-2 rounded border hover:bg-gray-50">
+                    Agendados
+                </button>
             </div>
         </div>
+    </div>
 
+    <!-- Leads Table -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 mb-8">
         <div class="bg-white rounded-lg shadow">
             <div class="px-6 py-4 border-b">
-                <h2 class="text-lg font-semibold">📋 Todas las Citas</h2>
+                <h2 class="text-lg font-semibold">Leads</h2>
             </div>
             <div class="overflow-x-auto">
                 <table class="w-full">
                     <thead class="bg-gray-50">
                         <tr>
-                            <th class="px-6 py-3 text-left">Fecha y Hora</th>
-                            <th class="px-6 py-3 text-left">Nombre</th>
-                            <th class="px-6 py-3 text-left">Teléfono</th>
-                            <th class="px-6 py-3 text-left">Estado</th>
-                            <th class="px-6 py-3 text-left">Acciones</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Teléfono</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Interés</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Días sin contacto</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Próxima acción</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acciones rápidas</th>
                         </tr>
                     </thead>
-                    <tbody id="appointments-tbody">
-                        <tr><td colspan="5" class="px-6 py-4 text-center">Cargando...</td></tr>
+                    <tbody id="leads-tbody" class="divide-y divide-gray-200">
+                        <tr>
+                            <td colspan="7" class="px-6 py-4 text-center text-gray-500">
+                                Cargando leads...
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
 
-    <!-- Modal -->
-    <div id="conversation-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+    <!-- Modal para ver conversación -->
+    <div id="conversation-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] flex flex-col">
             <div class="px-6 py-4 border-b flex justify-between items-center">
-                <h3 class="text-lg font-semibold">Conversación</h3>
-                <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 text-2xl">✕</button>
+                <div>
+                    <h3 class="text-lg font-semibold" id="modal-lead-name">Conversación</h3>
+                    <p class="text-sm text-gray-500" id="modal-lead-phone"></p>
+                </div>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 text-2xl">×</button>
             </div>
-            <div id="conversation-content" class="flex-1 overflow-y-auto p-6"></div>
+            <div id="conversation-content" class="flex-1 overflow-y-auto p-6">
+                <!-- Mensajes aparecerán aquí -->
+            </div>
+            <div class="px-6 py-4 border-t bg-gray-50">
+                <div class="flex gap-2">
+                    <input type="text" 
+                           id="quick-note-input"
+                           placeholder="Agregar nota rápida..."
+                           class="flex-1 px-4 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button onclick="addQuickNote()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                        Agregar
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
-        // Dashboard JavaScript
-        let currentSection = 'stats';
+        // Variables globales
+        let leadsData = [];
+        let statsData = {};
+        let currentFilter = {
+            status: null,
+            needsFollowup: false
+        };
+        let currentLeadId = null;
 
-        function showSection(section) {
-            currentSection = section;
-            document.getElementById('stats-section').classList.toggle('hidden', section !== 'stats');
-            document.getElementById('appointments-section').classList.toggle('hidden', section !== 'appointments');
-            
-            document.getElementById('btn-stats').classList.toggle('bg-blue-100', section === 'stats');
-            document.getElementById('btn-appointments').classList.toggle('bg-blue-100', section === 'appointments');
-            
-            if (section === 'appointments') {
-                loadAppointments();
-                loadTodayAppointments();
-            }
-        }
-
+        // Cargar estadísticas
         async function loadStats() {
             try {
                 const response = await fetch('/api/stats');
-                const data = await response.json();
+                statsData = await response.json();
                 
                 document.getElementById('stats-container').innerHTML = `
                     <div class="bg-white p-6 rounded-lg shadow">
                         <div class="text-gray-500 text-sm">Total Leads</div>
-                        <div class="text-3xl font-bold text-blue-600">${data.total_leads || 0}</div>
+                        <div class="text-3xl font-bold text-blue-600">${statsData.total_leads}</div>
                     </div>
                     <div class="bg-white p-6 rounded-lg shadow">
-                        <div class="text-gray-500 text-sm">Interesados</div>
-                        <div class="text-3xl font-bold text-green-600">${data.interested || 0}</div>
+                        <div class="text-gray-500 text-sm">Con Cita Agendada</div>
+                        <div class="text-3xl font-bold text-green-600">${statsData.scheduled}</div>
                     </div>
                     <div class="bg-white p-6 rounded-lg shadow">
-                        <div class="text-gray-500 text-sm">Agendados</div>
-                        <div class="text-3xl font-bold text-purple-600">${data.scheduled || 0}</div>
+                        <div class="text-gray-500 text-sm">Necesitan Seguimiento</div>
+                        <div class="text-3xl font-bold text-orange-600">${statsData.needs_followup}</div>
                     </div>
                     <div class="bg-white p-6 rounded-lg shadow">
-                        <div class="text-gray-500 text-sm">Conversión</div>
-                        <div class="text-3xl font-bold text-yellow-600">${data.conversion_rate || 0}%</div>
+                        <div class="text-gray-500 text-sm">Tasa de Conversión</div>
+                        <div class="text-3xl font-bold text-purple-600">${statsData.conversion_rate}%</div>
                     </div>
                 `;
             } catch (error) {
                 console.error('Error cargando stats:', error);
-                document.getElementById('stats-container').innerHTML = '<div class="text-red-500">Error cargando estadísticas</div>';
             }
         }
 
+        // Cargar leads
         async function loadLeads() {
             try {
-                const response = await fetch('/api/leads');
-                const leads = await response.json();
+                let url = '/api/leads?';
+                if (currentFilter.status) {
+                    url += `status=${currentFilter.status}&`;
+                }
+                if (currentFilter.needsFollowup) {
+                    url += 'needs_followup=true';
+                }
+                
+                const response = await fetch(url);
+                leadsData = await response.json();
                 
                 const tbody = document.getElementById('leads-tbody');
-                if (leads.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center">No hay leads</td></tr>';
+                
+                if (leadsData.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="px-6 py-4 text-center text-gray-500">
+                                No hay leads con estos filtros
+                            </td>
+                        </tr>
+                    `;
                     return;
                 }
                 
-                tbody.innerHTML = leads.map(lead => `
-                    <tr class="hover:bg-gray-50 border-t">
-                        <td class="px-6 py-4">${lead.name}</td>
-                        <td class="px-6 py-4">${lead.phone}</td>
-                        <td class="px-6 py-4">
-                            <span class="px-2 py-1 rounded text-xs status-${lead.status}">${lead.status}</span>
-                        </td>
-                        <td class="px-6 py-4">${'⭐'.repeat(Math.min(lead.interest_level || 0, 5))}</td>
-                        <td class="px-6 py-4">${lead.messages || 0}</td>
-                        <td class="px-6 py-4">
-                            <button onclick="viewConversation(${lead.id})" class="text-blue-600 hover:underline">Ver Chat</button>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (error) {
-                console.error('Error cargando leads:', error);
-                document.getElementById('leads-tbody').innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-red-500">Error cargando leads</td></tr>';
-            }
-        }
-
-        async function loadAppointments() {
-            try {
-                const response = await fetch('/api/appointments');
-                const appointments = await response.json();
-                
-                const tbody = document.getElementById('appointments-tbody');
-                if (!appointments || appointments.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center">No hay citas agendadas</td></tr>';
-                    return;
-                }
-                
-                tbody.innerHTML = appointments.map(apt => {
-                    const dt = new Date(apt.datetime);
-                    const dateStr = dt.toLocaleDateString('es-MX');
-                    const timeStr = dt.toLocaleTimeString('es-MX', {hour: '2-digit', minute:'2-digit'});
+                tbody.innerHTML = leadsData.map(lead => {
+                    // Calcular días sin contacto
+                    let daysSinceContact = lead.days_since_contact !== null 
+                        ? `${lead.days_since_contact} días` 
+                        : 'Nunca';
+                    
+                    // Color según días sin contacto
+                    let daysColor = 'text-gray-600';
+                    if (lead.days_since_contact > 7) daysColor = 'text-red-600 font-semibold';
+                    else if (lead.days_since_contact > 3) daysColor = 'text-orange-600';
+                    
+                    // Nivel de interés visual
+                    let interestDisplay = '⭐'.repeat(Math.ceil(lead.interest_level / 2));
+                    let interestColor = lead.interest_level >= 7 ? 'text-yellow-500' : 'text-gray-400';
+                    
+                    // Próxima acción
+                    const action = lead.next_action;
                     
                     return `
-                        <tr class="hover:bg-gray-50 border-t">
-                            <td class="px-6 py-4">${dateStr} ${timeStr}</td>
-                            <td class="px-6 py-4">${apt.lead_name}</td>
-                            <td class="px-6 py-4">${apt.lead_phone}</td>
+                        <tr class="hover:bg-gray-50">
                             <td class="px-6 py-4">
-                                <span class="px-2 py-1 rounded text-xs status-${apt.status}">${apt.status}</span>
+                                <div class="font-medium">${lead.name}</div>
+                                <div class="text-xs text-gray-500">${lead.total_messages} mensajes</div>
                             </td>
                             <td class="px-6 py-4">
-                                ${apt.status === 'scheduled' ? 
-                                    `<button onclick="confirmAppointment(${apt.id})" class="text-green-600 hover:text-green-800 mr-2">✅</button>` : ''}
-                                <button onclick="cancelAppointment(${apt.id})" class="text-red-600 hover:text-red-800">❌</button>
+                                <a href="https://wa.me/${lead.phone.replace(/[^0-9]/g, '')}" 
+                                   target="_blank"
+                                   class="text-blue-600 hover:underline">
+                                    ${lead.phone}
+                                </a>
+                            </td>
+                            <td class="px-6 py-4">
+                                <select onchange="updateStatus(${lead.id}, this.value)"
+                                        class="px-2 py-1 rounded text-xs font-medium status-${lead.status} border-0">
+                                    <option value="new" ${lead.status === 'new' ? 'selected' : ''}>new</option>
+                                    <option value="contacted" ${lead.status === 'contacted' ? 'selected' : ''}>contacted</option>
+                                    <option value="interested" ${lead.status === 'interested' ? 'selected' : ''}>interested</option>
+                                    <option value="scheduled" ${lead.status === 'scheduled' ? 'selected' : ''}>scheduled</option>
+                                    <option value="engaged" ${lead.status === 'engaged' ? 'selected' : ''}>engaged</option>
+                                </select>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="${interestColor}">${interestDisplay}</span>
+                                <span class="text-xs text-gray-500 ml-1">${lead.interest_level}/10</span>
+                            </td>
+                            <td class="px-6 py-4 ${daysColor}">
+                                ${daysSinceContact}
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="flex items-center gap-2 px-3 py-1 rounded priority-${action.priority}">
+                                    <span>${action.icon}</span>
+                                    <span class="text-xs font-medium">${action.label}</span>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="flex gap-2">
+                                    <button onclick="viewConversation(${lead.id})" 
+                                            class="action-button px-3 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200">
+                                        Ver Chat
+                                    </button>
+                                    <a href="https://wa.me/${lead.phone.replace(/[^0-9]/g, '')}" 
+                                       target="_blank"
+                                       class="action-button px-3 py-1 bg-green-100 text-green-700 rounded text-sm hover:bg-green-200">
+                                        WhatsApp
+                                    </a>
+                                </div>
                             </td>
                         </tr>
                     `;
                 }).join('');
             } catch (error) {
-                console.error('Error cargando appointments:', error);
-                document.getElementById('appointments-tbody').innerHTML = '<tr><td colspan="5" class="text-center text-red-500">Error cargando citas</td></tr>';
+                console.error('Error cargando leads:', error);
             }
         }
 
-        async function loadTodayAppointments() {
-            try {
-                const response = await fetch('/api/appointments/today');
-                const appointments = await response.json();
-                
-                const container = document.getElementById('today-appointments');
-                if (!appointments || appointments.length === 0) {
-                    container.innerHTML = '<p class="text-gray-500">No hay citas para hoy</p>';
-                    return;
-                }
-                
-                container.innerHTML = appointments.map(apt => `
-                    <div class="border rounded-lg p-4 mb-2 ${apt.confirmed ? 'bg-green-50' : 'bg-yellow-50'}">
-                        <div class="flex justify-between">
-                            <div>
-                                <p class="font-semibold">${apt.time} - ${apt.lead_name}</p>
-                                <p class="text-sm text-gray-600">📱 ${apt.lead_phone}</p>
-                            </div>
-                            <span class="px-3 py-1 rounded-full text-xs status-${apt.status}">${apt.status}</span>
-                        </div>
-                    </div>
-                `).join('');
-            } catch (error) {
-                console.error('Error cargando citas de hoy:', error);
-            }
-        }
-
+        // Ver conversación
         async function viewConversation(leadId) {
             try {
+                currentLeadId = leadId;
                 const response = await fetch(`/api/leads/${leadId}`);
                 const data = await response.json();
                 
+                document.getElementById('modal-lead-name').textContent = data.lead.name;
+                document.getElementById('modal-lead-phone').textContent = data.lead.phone;
+                
                 const content = document.getElementById('conversation-content');
-                content.innerHTML = `
-                    <div class="mb-4">
-                        <p class="font-semibold">${data.lead.name || 'Sin nombre'}</p>
-                        <p class="text-sm text-gray-500">${data.lead.phone}</p>
-                    </div>
-                    <div class="space-y-4">
-                        ${data.messages.map(msg => `
-                            <div class="${msg.sender === 'user' ? 'text-right' : 'text-left'}">
-                                <div class="inline-block max-w-xs px-4 py-2 rounded-lg ${
-                                    msg.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200'
-                                }">
-                                    <p>${msg.content}</p>
-                                    <p class="text-xs mt-1 opacity-70">${new Date(msg.timestamp).toLocaleString('es-MX')}</p>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
+                
+                if (data.messages.length === 0) {
+                    content.innerHTML = '<p class="text-gray-500 text-center">No hay mensajes todavía</p>';
+                } else {
+                    content.innerHTML = `
+                        <div class="space-y-4">
+                            ${data.messages.map(msg => {
+                                const isUser = msg.sender === 'user';
+                                const isNote = msg.sender === 'admin';
+                                
+                                if (isNote) {
+                                    return `
+                                        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded">
+                                            <p class="text-sm font-medium text-yellow-800">📝 Nota interna</p>
+                                            <p class="text-sm text-yellow-700 mt-1">${msg.content}</p>
+                                            <p class="text-xs text-yellow-600 mt-1">
+                                                ${new Date(msg.timestamp).toLocaleString('es-MX')}
+                                            </p>
+                                        </div>
+                                    `;
+                                }
+                                
+                                return `
+                                    <div class="${isUser ? 'text-right' : 'text-left'}">
+                                        <div class="inline-block max-w-xs px-4 py-2 rounded-lg ${
+                                            isUser 
+                                            ? 'bg-blue-500 text-white' 
+                                            : 'bg-gray-200 text-gray-800'
+                                        }">
+                                            <p class="text-sm">${msg.content}</p>
+                                            <p class="text-xs mt-1 opacity-70">
+                                                ${new Date(msg.timestamp).toLocaleString('es-MX')}
+                                            </p>
+                                            ${msg.intent ? `<p class="text-xs mt-1 opacity-60">🏷️ ${msg.intent}</p>` : ''}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `;
+                }
+                
+                // Mostrar citas si existen
+                if (data.appointments && data.appointments.length > 0) {
+                    content.innerHTML += `
+                        <div class="mt-6 pt-6 border-t">
+                            <h4 class="font-semibold mb-3">📅 Citas</h4>
+                            ${data.appointments.map(apt => {
+                                const dt = new Date(apt.datetime);
+                                return `
+                                    <div class="bg-blue-50 p-3 rounded mb-2">
+                                        <div class="flex justify-between items-center">
+                                            <div>
+                                                <p class="font-medium">${dt.toLocaleDateString('es-MX')} a las ${dt.toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})}</p>
+                                                <p class="text-sm text-gray-600">Estado: ${apt.status}</p>
+                                            </div>
+                                            <span class="px-2 py-1 rounded text-xs ${apt.confirmed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">
+                                                ${apt.confirmed ? '✓ Confirmada' : '⏳ Pendiente'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `;
+                }
                 
                 document.getElementById('conversation-modal').classList.remove('hidden');
             } catch (error) {
                 console.error('Error cargando conversación:', error);
-                alert('Error al cargar la conversación');
             }
         }
 
+        // Cerrar modal
         function closeModal() {
             document.getElementById('conversation-modal').classList.add('hidden');
+            currentLeadId = null;
+            document.getElementById('quick-note-input').value = '';
         }
 
-        async function confirmAppointment(id) {
+        // Agregar nota rápida
+        async function addQuickNote() {
+            const noteInput = document.getElementById('quick-note-input');
+            const note = noteInput.value.trim();
+            
+            if (!note || !currentLeadId) return;
+            
             try {
-                await fetch(`/api/appointments/${id}/confirm`, {method: 'POST'});
-                loadAppointments();
-                loadTodayAppointments();
+                await fetch(`/api/leads/${currentLeadId}/add-note`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ note })
+                });
+                
+                noteInput.value = '';
+                viewConversation(currentLeadId); // Recargar conversación
             } catch (error) {
-                console.error('Error confirmando cita:', error);
+                console.error('Error agregando nota:', error);
+                alert('Error al agregar la nota');
             }
         }
 
-        async function cancelAppointment(id) {
-            if (!confirm('¿Seguro que quieres cancelar esta cita?')) return;
+        // Actualizar status de lead
+        async function updateStatus(leadId, newStatus) {
             try {
-                await fetch(`/api/appointments/${id}/cancel`, {method: 'POST'});
-                loadAppointments();
-                loadTodayAppointments();
+                await fetch(`/api/leads/${leadId}/update-status`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ status: newStatus })
+                });
+                
+                // Recargar datos
+                refreshData();
             } catch (error) {
-                console.error('Error cancelando cita:', error);
+                console.error('Error actualizando status:', error);
+                alert('Error al actualizar el estado');
             }
         }
 
-        function refreshData() {
-            if (currentSection === 'stats') {
-                loadStats();
+        // Filtrar por status
+        function filterByStatus(status) {
+            currentFilter.status = status;
+            
+            // Actualizar estilos de botones
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active', 'bg-blue-100', 'border-blue-500');
+            });
+            event.target.classList.add('active', 'bg-blue-100', 'border-blue-500');
+            
+            loadLeads();
+        }
+
+        // Toggle filtro de seguimiento
+        function toggleFilter(filterType) {
+            if (filterType === 'needs_followup') {
+                currentFilter.needsFollowup = !currentFilter.needsFollowup;
+                
+                const btn = document.getElementById('filter-followup');
+                if (currentFilter.needsFollowup) {
+                    btn.classList.add('bg-orange-100', 'border-orange-500', 'text-orange-700');
+                } else {
+                    btn.classList.remove('bg-orange-100', 'border-orange-500', 'text-orange-700');
+                }
+                
                 loadLeads();
-            } else {
-                loadAppointments();
-                loadTodayAppointments();
             }
         }
 
-        // Initialize when page loads
+        // Actualizar datos
+        function refreshData() {
+            loadStats();
+            loadLeads();
+        }
+
+        // Cargar datos al iniciar
         document.addEventListener('DOMContentLoaded', () => {
-            console.log('Dashboard cargando...');
             refreshData();
-            // Auto refresh every 10 seconds
-            setInterval(refreshData, 10000);
+            // Auto-actualizar cada 30 segundos
+            setInterval(refreshData, 30000);
+        });
+        
+        // Cerrar modal con ESC
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+        
+        // Agregar nota con Enter
+        document.getElementById('quick-note-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addQuickNote();
         });
     </script>
 </body>

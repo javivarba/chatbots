@@ -1,93 +1,119 @@
 """
-Servicio de Agendamiento de Clases
+Appointment Scheduler Simplificado para BJJ Mingo
+Versión actualizada con horarios reales y sistema de semana de prueba
 """
 
 import sqlite3
 from datetime import datetime, timedelta
 import re
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class AppointmentScheduler:
     def __init__(self):
         self.db_path = 'bjj_academy.db'
-        self.days_map = {
-            'lunes': 1, 'martes': 2, 'miércoles': 3, 'miercoles': 3,
-            'jueves': 4, 'viernes': 5, 'sábado': 6, 'sabado': 6,
-            'mañana': -1, 'hoy': 0, 'pasado mañana': -2
+        
+        # Horarios REALES de BJJ Mingo
+        self.horarios = {
+            'adultos_jiujitsu': {
+                'dias': [1, 2, 3, 4, 5],  # Lunes a Viernes (1=Lunes)
+                'hora': '18:00',  # 6:00 PM
+                'nombre': 'Jiu-Jitsu Adultos',
+                'descripcion': 'Jiu-Jitsu para adultos'
+            },
+            'adultos_striking': {
+                'dias': [2, 4],  # Martes y Jueves
+                'hora': '19:30',  # 7:30 PM
+                'nombre': 'Striking Adultos',
+                'descripcion': 'Striking para adultos'
+            },
+            'kids': {
+                'dias': [2, 4],  # Martes y Jueves
+                'hora': '17:00',  # 5:00 PM
+                'nombre': 'Jiu-Jitsu Kids',
+                'edad': '4 a 10 años',
+                'descripcion': 'Jiu-Jitsu para niños de 4 a 10 años'
+            },
+            'juniors': {
+                'dias': [1, 3],  # Lunes y Miércoles
+                'hora': '17:00',  # 5:00 PM
+                'nombre': 'Jiu-Jitsu Juniors',
+                'edad': '11 a 16 años',
+                'descripcion': 'Jiu-Jitsu para adolescentes de 11 a 16 años'
+            }
         }
-        self.time_map = {
-            '7am': '07:00', '7': '07:00', 'mañana temprano': '07:00',
-            '12pm': '12:00', '12': '12:00', 'mediodía': '12:00', 'mediodia': '12:00',
-            '6pm': '18:00', '6': '18:00', '18': '18:00', 'tarde': '18:00',
-            '8pm': '20:00', '8': '20:00', '20': '20:00', 'noche': '20:00',
-            '9am': '09:00', '9': '09:00',
-            '11am': '11:00', '11': '11:00'
+        
+        # Mapeo de días en español
+        self.dias_nombres = {
+            1: 'Lunes', 2: 'Martes', 3: 'Miércoles',
+            4: 'Jueves', 5: 'Viernes', 6: 'Sábado', 7: 'Domingo'
         }
     
-    def get_available_slots(self, days_ahead=7):
-        """Obtener slots disponibles para los próximos días"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
+    def get_available_slots(self, clase_tipo=None, days_ahead=14):
+        """
+        Obtiene slots disponibles para los próximos días
+        clase_tipo: 'adultos_jiujitsu', 'adultos_striking', 'kids', 'juniors', o None para todos
+        """
         available = []
         today = datetime.now()
         
+        # Si no especifican tipo, mostrar todos
+        tipos_a_mostrar = [clase_tipo] if clase_tipo else list(self.horarios.keys())
+        
         for i in range(1, days_ahead + 1):
             date = today + timedelta(days=i)
-            day_of_week = date.weekday() + 1  # Python: 0=Lun, SQL: 1=Lun
+            day_of_week = date.weekday() + 1  # Python: 0=Lun, convertir a 1=Lun
             
-            # Solo Lun-Sab (1-6)
-            if day_of_week > 6:
-                continue
-            
-            # Obtener horarios para ese día
-            cursor.execute("""
-                SELECT time_slot, max_capacity 
-                FROM schedule_slots 
-                WHERE day_of_week = ? AND is_active = 1
-                ORDER BY time_slot
-            """, (day_of_week,))
-            
-            slots = cursor.fetchall()
-            
-            for time_slot, max_capacity in slots:
-                # Contar citas existentes
-                datetime_str = f"{date.strftime('%Y-%m-%d')} {time_slot}:00"
-                cursor.execute("""
-                    SELECT COUNT(*) FROM appointment 
-                    WHERE appointment_datetime = ? AND status != 'cancelled'
-                """, (datetime_str,))
+            for tipo_key in tipos_a_mostrar:
+                horario = self.horarios[tipo_key]
                 
-                booked = cursor.fetchone()[0]
-                available_spots = max_capacity - booked
-                
-                if available_spots > 0:
-                    day_name = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 
-                               'Viernes', 'Sábado', 'Domingo'][day_of_week - 1]
+                # Verificar si hay clase ese día
+                if day_of_week in horario['dias']:
+                    datetime_str = f"{date.strftime('%Y-%m-%d')} {horario['hora']}:00"
                     
                     available.append({
                         'date': date.strftime('%Y-%m-%d'),
-                        'day': day_name,
-                        'time': time_slot,
+                        'day': self.dias_nombres[day_of_week],
+                        'time': horario['hora'],
                         'datetime': datetime_str,
-                        'available': available_spots,
-                        'display': f"{day_name} {date.strftime('%d/%m')} a las {time_slot}"
+                        'clase_nombre': horario['nombre'],
+                        'clase_tipo': tipo_key,
+                        'display': f"{self.dias_nombres[day_of_week]} {date.strftime('%d/%m')} - {horario['nombre']} a las {horario['hora']}"
                     })
         
-        conn.close()
         return available
     
     def parse_appointment_request(self, message, lead_id=None):
-        """Interpretar mensaje para extraer fecha y hora"""
+        """Interpretar mensaje para extraer tipo de clase, día y hora"""
         message_lower = message.lower()
+        
+        # Detectar tipo de clase
+        clase_tipo = None
+        if 'striking' in message_lower:
+            clase_tipo = 'adultos_striking'
+        elif any(word in message_lower for word in ['kid', 'niño', 'niña', 'hijo', 'hija', 'chiquito']):
+            clase_tipo = 'kids'
+        elif any(word in message_lower for word in ['junior', 'adolescente', 'teenager', 'chamaco']):
+            clase_tipo = 'juniors'
+        elif any(word in message_lower for word in ['adulto', 'jiu', 'jiujitsu', 'bjj']):
+            clase_tipo = 'adultos_jiujitsu'
+        else:
+            # Por defecto, adultos jiu-jitsu
+            clase_tipo = 'adultos_jiujitsu'
         
         # Buscar día
         target_date = None
-        target_time = None
+        days_map = {
+            'lunes': 1, 'martes': 2, 'miércoles': 3, 'miercoles': 3,
+            'jueves': 4, 'viernes': 5, 'sábado': 6, 'sabado': 6,
+            'mañana': -1, 'hoy': 0
+        }
         
-        # Verificar "mañana", "hoy", etc
-        for key, value in self.days_map.items():
+        for key, value in days_map.items():
             if key in message_lower:
-                if value < 0:  # mañana, pasado mañana
+                if value < 0:  # mañana
                     target_date = datetime.now() + timedelta(days=abs(value))
                 elif value == 0:  # hoy
                     target_date = datetime.now()
@@ -96,182 +122,215 @@ class AppointmentScheduler:
                     today = datetime.now()
                     days_ahead = (value - today.weekday() - 1) % 7
                     if days_ahead == 0:
-                        days_ahead = 7  # Si es el mismo día, siguiente semana
+                        days_ahead = 7
                     target_date = today + timedelta(days=days_ahead)
                 break
         
-        # Buscar hora
-        for key, value in self.time_map.items():
-            if key in message_lower:
-                target_time = value
-                break
+        # Si no se especificó día, usar el próximo día disponible para esa clase
+        if not target_date and clase_tipo:
+            target_date = self._get_next_available_day(clase_tipo)
         
-        # Si no encontramos hora específica, buscar patrones
-        if not target_time:
-            # Buscar patrones como "18:00", "6:00"
-            time_pattern = re.search(r'(\d{1,2}):?(\d{2})?\s?(am|pm)?', message_lower)
-            if time_pattern:
-                hour = int(time_pattern.group(1))
-                minutes = time_pattern.group(2) or '00'
-                ampm = time_pattern.group(3)
-                
-                if ampm == 'pm' and hour < 12:
-                    hour += 12
-                
-                target_time = f"{hour:02d}:{minutes}"
-        
-        if target_date and target_time:
+        # Si se detectó clase y día, construir datetime
+        if clase_tipo and target_date:
+            horario = self.horarios[clase_tipo]
+            datetime_str = f"{target_date.strftime('%Y-%m-%d')} {horario['hora']}:00"
+            
             return {
+                'parsed': True,
+                'clase_tipo': clase_tipo,
                 'date': target_date.strftime('%Y-%m-%d'),
-                'time': target_time,
-                'datetime': f"{target_date.strftime('%Y-%m-%d')} {target_time}:00",
-                'parsed': True
+                'time': horario['hora'],
+                'datetime': datetime_str,
+                'clase_nombre': horario['nombre']
             }
         
-        return {'parsed': False, 'date': None, 'time': None}
+        return {'parsed': False}
     
-    def book_appointment(self, lead_id, appointment_datetime, notes=None):
-        """Reservar una cita"""
+    def _get_next_available_day(self, clase_tipo):
+        """Obtiene el próximo día disponible para una clase"""
+        horario = self.horarios[clase_tipo]
+        today = datetime.now()
+        
+        for i in range(1, 14):  # Buscar en los próximos 14 días
+            date = today + timedelta(days=i)
+            day_of_week = date.weekday() + 1
+            
+            if day_of_week in horario['dias']:
+                return date
+        
+        return None
+    
+    def book_trial_week(self, lead_id, clase_tipo, notes=None):
+        """
+        Registra una semana de prueba para un prospecto
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        # Verificar si el lead ya tiene una cita
+    
+    # Verificar si ya tiene una semana de prueba activa
         cursor.execute("""
-            SELECT COUNT(*) FROM appointment 
-            WHERE lead_id = ? AND status = 'scheduled'
+            SELECT COUNT(*) FROM trial_week 
+            WHERE lead_id = ? AND status = 'active'
         """, (lead_id,))
-        
+    
         if cursor.fetchone()[0] > 0:
             conn.close()
             return {
                 'success': False,
-                'message': 'Ya tienes una clase agendada. Por favor cancela la anterior primero.'
+                'message': 'Ya tenés una semana de prueba activa.'
             }
-        
-        # Parsear fecha y hora
-        dt = datetime.strptime(appointment_datetime, '%Y-%m-%d %H:%M:%S')
-        
-        # Verificar que no sea en el pasado
-        if dt < datetime.now():
-            conn.close()
-            return {
-                'success': False,
-                'message': 'No puedes agendar clases en el pasado.'
-            }
-        
-        # Verificar disponibilidad
-        day_of_week = dt.weekday() + 1
-        time_slot = dt.strftime('%H:%M')
-        
-        cursor.execute("""
-            SELECT max_capacity FROM schedule_slots 
-            WHERE day_of_week = ? AND time_slot = ?
-        """, (day_of_week, time_slot))
-        
-        result = cursor.fetchone()
-        if not result:
-            conn.close()
-            return {
-                'success': False,
-                'message': 'Ese horario no está disponible.'
-            }
-        
-        max_capacity = result[0]
-        
-        # Contar reservas existentes
-        cursor.execute("""
-            SELECT COUNT(*) FROM appointment 
-            WHERE appointment_datetime = ? AND status != 'cancelled'
-        """, (appointment_datetime,))
-        
-        current_bookings = cursor.fetchone()[0]
-        
-        if current_bookings >= max_capacity:
-            conn.close()
-            return {
-                'success': False,
-                'message': 'Lo siento, esa clase está llena. Por favor elige otro horario.'
-            }
-        
-        # Crear la cita
+    
+        start_date = datetime.now()
+        end_date = start_date + timedelta(days=7)
+    
         try:
+        # Registrar la semana de prueba
             cursor.execute("""
-                INSERT INTO appointment 
-                (lead_id, appointment_date, appointment_time, appointment_datetime, 
-                 status, class_type, confirmed, notes)
-                VALUES (?, ?, ?, ?, 'scheduled', 'trial', 1, ?)
-            """, (lead_id, dt.strftime('%Y-%m-%d'), dt.strftime('%H:%M:%S'), 
-                  appointment_datetime, notes))
-            
-            # Actualizar status del lead
+                INSERT INTO trial_week 
+                (lead_id, clase_tipo, start_date, end_date, status, notes)
+                VALUES (?, ?, ?, ?, 'active', ?)
+            """, (lead_id, clase_tipo, start_date.strftime('%Y-%m-%d'), 
+                    end_date.strftime('%Y-%m-%d'), notes))
+        
+        # Actualizar status del lead
             cursor.execute("""
-                UPDATE lead SET status = 'scheduled', interest_level = 9 
+                UPDATE lead 
+                SET status = 'trial_scheduled', interest_level = 9 
                 WHERE id = ?
             """, (lead_id,))
-            
+        
             conn.commit()
-            
-            # Generar link de Google Calendar
-            calendar_link = self.generate_calendar_link(dt)
-            
+        
+        # Preparar mensaje de confirmación
+            horario = self.horarios[clase_tipo]
+            dias_texto = self._get_dias_texto(horario['dias'])
+        
+        # Calcular la próxima clase (primer día disponible)
+            next_class_date = self._get_next_class_date(clase_tipo)
+        
+        # Generar link de Google Calendar
+            calendar_link = self.generate_calendar_link(next_class_date, horario['nombre'])
+        
+            confirmation = f"""✅ ¡SEMANA DE PRUEBA CONFIRMADA!
+
+📋 Detalles:
+- Clase: {horario['nombre']}
+- Días: {dias_texto}
+- Hora: {horario['hora']}
+- Primera clase: {next_class_date.strftime('%A %d/%m/%Y')}
+- Válido hasta: {end_date.strftime('%d/%m/%Y')}
+
+📅 Agregar a tu calendario:
+{calendar_link}
+
+📍 Ubicación: Santo Domingo de Heredia
+🗺️ Waze: https://waze.com/ul/hd1u0y3qpc
+
+👕 Qué traer:
+- Ropa deportiva cómoda (pantaloneta/lycra, camisa deportiva)
+- Sin zapatos
+- Agua
+- Si tenés gi, podés traerlo
+
+📞 Cualquier duda: {self._get_phone()}
+
+¡Te esperamos! 🥋"""
+        
             conn.close()
-            
+        
             return {
                 'success': True,
-                'message': f"✅ ¡Clase confirmada para {dt.strftime('%A %d/%m a las %H:%M')}!",
-                'appointment_id': cursor.lastrowid,
-                'calendar_link': calendar_link,
-                'datetime': appointment_datetime
+                'message': confirmation,
+                'trial_id': cursor.lastrowid,
+                'calendar_link': calendar_link
             }
-            
-        except sqlite3.IntegrityError:
-            conn.close()
-            return {
-                'success': False,
-                'message': 'Ya tienes una cita agendada para ese horario.'
-            }
+        
         except Exception as e:
             conn.close()
+            logger.error(f"Error registrando semana de prueba: {e}")
             return {
                 'success': False,
-                'message': f'Error al agendar: {str(e)}'
+                'message': f'Error al registrar: {str(e)}'
             }
     
-    def generate_calendar_link(self, dt):
-        """Generar link para agregar a Google Calendar"""
-        # Formato: YYYYMMDDTHHmmss
-        start = dt.strftime('%Y%m%dT%H%M%S')
-        end = (dt + timedelta(hours=1)).strftime('%Y%m%dT%H%M%S')
-        
-        title = "Clase de Prueba - BJJ Academy"
-        details = "Tu primera clase de Brazilian Jiu-Jitsu. ¡No olvides traer ropa cómoda y agua!"
-        location = "BJJ Academy, 123 Main St"
-        
-        # Crear URL de Google Calendar
-        base_url = "https://calendar.google.com/calendar/render?action=TEMPLATE"
-        url = f"{base_url}&text={title}&dates={start}/{end}&details={details}&location={location}"
-        
-        # Reemplazar espacios y caracteres especiales
-        url = url.replace(' ', '%20').replace('¡', '%C2%A1').replace('!', '%21')
-        
-        return url
+    def _get_dias_texto(self, dias_nums):
+        """Convierte lista de números de días a texto"""
+        return ', '.join([self.dias_nombres[d] for d in dias_nums])
     
-    def format_available_slots_message(self, slots):
+    def _get_phone(self):
+        """Obtiene el teléfono de la academia"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT phone FROM academy WHERE id = 1")
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result else '+506-8888-8888'
+    
+    def format_available_slots_message(self, slots, clase_tipo=None):
         """Formatear mensaje con slots disponibles"""
         if not slots:
             return "Lo siento, no hay horarios disponibles en los próximos días."
         
-        message = "📅 Horarios disponibles para tu clase de prueba:\n\n"
+        if clase_tipo:
+            horario = self.horarios[clase_tipo]
+            message = f"📅 Horarios disponibles para {horario['nombre']}:\n\n"
+        else:
+            message = "📅 Horarios disponibles para tu semana de prueba GRATIS:\n\n"
         
-        current_date = None
-        for slot in slots[:10]:  # Máximo 10 opciones
-            if slot['date'] != current_date:
-                current_date = slot['date']
-                message += f"\n**{slot['day']} {datetime.strptime(slot['date'], '%Y-%m-%d').strftime('%d/%m')}:**\n"
-            
-            message += f"  • {slot['time']} ({slot['available']} lugares)\n"
+        # Agrupar por clase
+        por_clase = {}
+        for slot in slots[:20]:  # Máximo 20
+            tipo = slot['clase_tipo']
+            if tipo not in por_clase:
+                por_clase[tipo] = []
+            por_clase[tipo].append(slot)
         
-        message += "\n💬 Responde con el día y hora que prefieras."
-        message += "\nEjemplo: 'Mañana a las 6pm' o 'Lunes 18:00'"
+        for tipo, slots_tipo in por_clase.items():
+            horario = self.horarios[tipo]
+            message += f"\n**{horario['nombre']}:**\n"
+            dias_texto = self._get_dias_texto(horario['dias'])
+            message += f"  {dias_texto} a las {horario['hora']}\n"
+        
+        message += "\n💬 Respondé con el nombre de la clase y cuándo querés empezar.\n"
+        message += "Ejemplo: 'Jiu-Jitsu adultos el martes'\n"
+        message += "\n🎁 Recordá: ¡Tu primera SEMANA es GRATIS!"
         
         return message
+    def _get_next_class_date(self, clase_tipo):
+        """Calcula la fecha de la próxima clase disponible"""
+        horario = self.horarios[clase_tipo]
+        today = datetime.now()
+    
+        for i in range(1, 14):  # Buscar en los próximos 14 días
+            date = today + timedelta(days=i)
+            day_of_week = date.weekday() + 1
+        
+            if day_of_week in horario['dias']:
+                # Crear datetime con la hora de la clase
+                hora_partes = horario['hora'].split(':')
+                return date.replace(hour=int(hora_partes[0]), minute=int(hora_partes[1]))
+    
+        return today  # Fallback
+
+    def generate_calendar_link(self, dt, clase_nombre):
+        """Generar link para agregar a Google Calendar"""
+        # Formato: YYYYMMDDTHHmmss
+        start = dt.strftime('%Y%m%dT%H%M%S')
+        end = (dt + timedelta(hours=1, minutes=30)).strftime('%Y%m%dT%H%M%S')
+    
+        title = f"Clase de Prueba - {clase_nombre}"
+        details = f"Tu primera clase en BJJ Mingo. ¡Traé ropa cómoda y agua!"
+        location = "Santo Domingo de Heredia, Costa Rica"
+    
+        # Crear URL de Google Calendar
+        base_url = "https://calendar.google.com/calendar/render?action=TEMPLATE"
+    
+        # Encode los valores
+        import urllib.parse
+        title_encoded = urllib.parse.quote(title)
+        details_encoded = urllib.parse.quote(details)
+        location_encoded = urllib.parse.quote(location)
+    
+        url = f"{base_url}&text={title_encoded}&dates={start}/{end}&details={details_encoded}&location={location_encoded}"
+    
+        return url

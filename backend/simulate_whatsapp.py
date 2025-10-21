@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 
 # URL del webhook local
-WEBHOOK_URL = "http://localhost:5000/webhooks/whatsapp/webhook"
+WEBHOOK_URL = "http://localhost:5000/webhook/whatsapp"
 
 def simulate_whatsapp_message(message, from_number="+50670036654", name="BJJ Mingo"):
     """
@@ -22,7 +22,7 @@ def simulate_whatsapp_message(message, from_number="+50670036654", name="BJJ Min
         'NumMedia': '0'
     }
     
-    print(f"\n📱 Enviando mensaje: '{message}'")
+    print(f"\n[PHONE] Enviando mensaje: '{message}'")
     print(f"   De: {from_number} ({name})")
     
     try:
@@ -37,54 +37,54 @@ def simulate_whatsapp_message(message, from_number="+50670036654", name="BJJ Min
             message_elem = root.find('.//Message')
             if message_elem is not None:
                 response_text = message_elem.text
-                print(f"\n🤖 Respuesta del bot:")
+                print(f"\n[BOT] Respuesta del bot:")
                 print("-" * 40)
                 print(response_text)
                 print("-" * 40)
             else:
-                print("✅ Mensaje procesado (sin respuesta)")
+                print("[OK] Mensaje procesado (sin respuesta)")
         else:
-            print(f"❌ Error: {response.status_code}")
+            print(f"[ERROR] Error: {response.status_code}")
             print(response.text)
-            
+
     except requests.exceptions.ConnectionError:
-        print("❌ Error: No se puede conectar al servidor")
-        print("   Asegúrate de que Flask está corriendo (python run.py)")
+        print("[ERROR] Error: No se puede conectar al servidor")
+        print("   Asegurate de que Flask esta corriendo (python run.py)")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] Error: {e}")
 
 def main():
     print("=" * 50)
-    print("🤖 SIMULADOR DE WHATSAPP BOT")
+    print("[BOT] SIMULADOR DE WHATSAPP BOT")
     print("=" * 50)
     print("\nComandos especiales:")
     print("  /salir - Terminar simulación")
     print("  /cambiar - Cambiar número/nombre")
     print("\n")
     
-    phone = input("📱 Número de teléfono (ej: +50688881234): ") or "+50688881234"
-    name = input("👤 Nombre (ej: Juan Pérez): ") or "Test User"
-    
-    print(f"\n✅ Simulando mensajes desde {phone} ({name})")
+    phone = input("[PHONE] Numero de telefono (ej: +50688881234): ") or "+50688881234"
+    name = input("[USER] Nombre (ej: Juan Perez): ") or "Test User"
+
+    print(f"\n[OK] Simulando mensajes desde {phone} ({name})")
     print("=" * 50)
-    
+
     while True:
-        message = input("\n💬 Escribe un mensaje (o /salir): ")
+        message = input("\n[CHAT] Escribe un mensaje (o /salir): ")
         
         if message.lower() == '/salir':
-            print("\n👋 Terminando simulación...")
+            print("\n[EXIT] Terminando simulacion...")
             break
         elif message.lower() == '/cambiar':
-            phone = input("📱 Nuevo número: ") or phone
-            name = input("👤 Nuevo nombre: ") or name
-            print(f"✅ Cambiado a {phone} ({name})")
+            phone = input("[PHONE] Nuevo numero: ") or phone
+            name = input("[USER] Nuevo nombre: ") or name
+            print(f"[OK] Cambiado a {phone} ({name})")
             continue
         elif message.strip() == '':
             continue
             
         simulate_whatsapp_message(message, phone, name)
-    
-    print("\n✨ Simulación terminada")
+
+    print("\n[DONE] Simulacion terminada")
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,5 @@
 ﻿from app import create_app
-from app.services.ai_service import AIService
+from app.services.openai_service import AIService
 import os
 
 app = create_app('default')

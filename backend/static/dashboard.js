@@ -46,24 +46,59 @@ async function loadLeads() {
     
     const tbody = document.getElementById('leads-tbody');
     if (leads.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center">No hay leads</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center">No hay leads</td></tr>';
         return;
     }
     
-    tbody.innerHTML = leads.map(lead => `
-        <tr class="hover:bg-gray-50 border-t">
-            <td class="px-6 py-4">${lead.name}</td>
-            <td class="px-6 py-4">${lead.phone}</td>
-            <td class="px-6 py-4">
-                <span class="px-2 py-1 rounded text-xs status-${lead.status}">${lead.status}</span>
-            </td>
-            <td class="px-6 py-4">${'⭐'.repeat(Math.min(lead.interest_level, 5))}</td>
-            <td class="px-6 py-4">${lead.messages}</td>
-            <td class="px-6 py-4">
-                <button onclick="viewConversation(${lead.id})" class="text-blue-600">Ver Chat</button>
-            </td>
-        </tr>
-    `).join('');
+    tbody.innerHTML = leads.map(lead => {
+        // Formatear última fecha de contacto
+        let lastContactDisplay = 'Nunca';
+        if (lead.last_contact) {
+            const lastDate = new Date(lead.last_contact);
+            const now = new Date();
+            const diffHours = Math.floor((now - lastDate) / (1000 * 60 * 60));
+            
+            if (diffHours < 1) {
+                lastContactDisplay = 'Hace minutos';
+            } else if (diffHours < 24) {
+                lastContactDisplay = `Hace ${diffHours}h`;
+            } else {
+                const diffDays = Math.floor(diffHours / 24);
+                if (diffDays === 1) {
+                    lastContactDisplay = 'Ayer';
+                } else if (diffDays < 7) {
+                    lastContactDisplay = `Hace ${diffDays}d`;
+                } else {
+                    lastContactDisplay = lastDate.toLocaleDateString('es-MX');
+                }
+            }
+        }
+        
+        // Formatear fuente con icono
+        const sourceIcons = {
+            'whatsapp': 'WhatsApp',
+            'facebook': 'Facebook',
+            'instagram': 'Instagram',
+            'web': 'Web'
+        };
+        const sourceDisplay = sourceIcons[lead.source] || lead.source;
+        
+        return `
+            <tr class="hover:bg-gray-50 border-t">
+                <td class="px-6 py-4">${lead.name}</td>
+                <td class="px-6 py-4">${lead.phone}</td>
+                <td class="px-6 py-4">
+                    <span class="px-2 py-1 rounded text-xs status-${lead.status}">${lead.status}</span>
+                </td>
+                <td class="px-6 py-4 text-sm">${sourceDisplay}</td>
+                <td class="px-6 py-4 text-sm text-gray-600">${lastContactDisplay}</td>
+                <td class="px-6 py-4">${lead.messages}</td>
+                <td class="px-6 py-4">
+                    <button onclick="viewConversation(${lead.id})" class="text-blue-600">Ver Chat</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
 async function loadAppointments() {
@@ -91,8 +126,8 @@ async function loadAppointments() {
                 </td>
                 <td class="px-6 py-4">
                     ${apt.status === 'scheduled' ? 
-                        `<button onclick="confirmAppointment(${apt.id})" class="text-green-600 mr-2">✅</button>` : ''}
-                    <button onclick="cancelAppointment(${apt.id})" class="text-red-600">❌</button>
+                        `<button onclick="confirmAppointment(${apt.id})" class="text-green-600 mr-2">Confirmar</button>` : ''}
+                    <button onclick="cancelAppointment(${apt.id})" class="text-red-600">Cancelar</button>
                 </td>
             </tr>
         `;
@@ -114,7 +149,7 @@ async function loadTodayAppointments() {
             <div class="flex justify-between">
                 <div>
                     <p class="font-semibold">${apt.time} - ${apt.lead_name}</p>
-                    <p class="text-sm text-gray-600">📱 ${apt.lead_phone}</p>
+                    <p class="text-sm text-gray-600">${apt.lead_phone}</p>
                 </div>
                 <span class="px-3 py-1 rounded-full text-xs status-${apt.status}">${apt.status}</span>
             </div>

@@ -1,42 +1,341 @@
 """
-Message Handler con Agendamiento Integrado
+Message Handler UNIFICADO con prioridad ABSOLUTA a OpenAI
+Actualizado para BJJ Mingo con voseo costarricense
 """
 
 import sqlite3
-from datetime import datetime, timedelta
 import os
-from app.services.appointment_scheduler import AppointmentScheduler
+import logging
+from datetime import datetime
+from dotenv import load_dotenv
+
+# Cargar variables de entorno
+load_dotenv(override=True)
+
+# Importar OpenAI
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    logging.warning("OpenAI no instalado")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 class MessageHandler:
+    """
+    Handler unificado que PRIORIZA OpenAI sobre todo
+    Actualizado para BJJ Mingo
+    """
+    
     def __init__(self):
         self.db_path = 'bjj_academy.db'
-        self.scheduler = AppointmentScheduler()
-        self.use_openai = False
+        self.openai_client = None
+        self.ai_enabled = False
         
-        # Verificar si hay OpenAI key
-        api_key = os.getenv('OPENAI_API_KEY', '')
-        if api_key and 'sk-' in api_key and 'AQUI_VA' not in api_key:
-            try:
-                import openai
-                openai.api_key = api_key
-                self.use_openai = True
-                print("✅ OpenAI habilitado")
-            except:
-                print("⚠️ OpenAI no disponible, usando respuestas predefinidas")
+        # Intentar inicializar OpenAI
+        self._initialize_openai()
+        
+        # Importar AppointmentScheduler
+        try:
+            from app.services.appointment_scheduler import AppointmentScheduler
+            self.scheduler = AppointmentScheduler()
+            logger.info("✅ AppointmentScheduler inicializado")
+        except Exception as e:
+            logger.warning(f"⚠️ AppointmentScheduler no disponible: {e}")
+            self.scheduler = None
     
-    def get_or_create_lead(self, phone_number, name=None):
-        """Obtener o crear un lead"""
+    def _initialize_openai(self):
+        """Inicializar cliente de OpenAI"""
+        api_key = os.getenv('OPENAI_API_KEY')
+        
+        logger.info("=" * 50)
+        logger.info("INICIALIZANDO MESSAGE HANDLER")
+        logger.info("=" * 50)
+        logger.info(f"OpenAI disponible: {OPENAI_AVAILABLE}")
+        logger.info(f"API Key presente: {'Sí' if api_key else 'No'}")
+        logger.info(f"API Key válida: {'Sí' if api_key and api_key.startswith('sk-') else 'No'}")
+        
+        if not OPENAI_AVAILABLE:
+            logger.error("❌ OpenAI library no instalada")
+            self.ai_enabled = False
+            return
+        
+        if not api_key or not api_key.startswith('sk-'):
+            logger.error("❌ OpenAI API Key no configurada correctamente")
+            self.ai_enabled = False
+            return
+        
+        try:
+            self.openai_client = OpenAI(api_key=api_key)
+            self.model = os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo')
+            self.max_tokens = int(os.getenv('OPENAI_MAX_TOKENS', 600))
+            self.temperature = float(os.getenv('OPENAI_TEMPERATURE', 0.7))
+            self.ai_enabled = True
+            
+            logger.info("✅ OpenAI configurado exitosamente")
+            logger.info(f"   Modelo: {self.model}")
+            logger.info(f"   Max tokens: {self.max_tokens}")
+            logger.info(f"   Temperature: {self.temperature}")
+            logger.info("=" * 50)
+            
+        except Exception as e:
+            logger.error(f"❌ Error inicializando OpenAI: {e}")
+            self.ai_enabled = False
+    
+    def process_message(self, phone_number, message, name=None):
+        """
+        Procesar mensaje - SIEMPRE intenta IA primero
+        """
+        logger.info(f"\n[PHONE] Mensaje de {phone_number}: {message}")
+        
+        # 1. Obtener o crear lead
+        lead_id = self._get_or_create_lead(phone_number, name)
+        
+        # 2. Obtener o crear conversación
+        conv_id = self._get_or_create_conversation(lead_id)
+        
+        # 3. Guardar mensaje del usuario
+        self._save_message(conv_id, 'user', message)
+        
+        # 4. INTENTAR GENERAR RESPUESTA CON IA
+        response = self._generate_ai_response(message, lead_id, conv_id)
+        
+        # 5. Guardar respuesta del bot
+        self._save_message(conv_id, 'bot', response)
+        
+        # 6. Actualizar lead
+        self._update_lead_status(lead_id, message)
+        
+        return response
+    
+    def _generate_ai_response(self, message, lead_id, conv_id):
+        """
+        Genera respuesta PRIORIZANDO IA + detección de agendamiento
+        """
+        
+        # PRIORIDAD 1: Intentar con OpenAI
+        if self.ai_enabled and self.openai_client:
+            try:
+                logger.info("[DEBUG] Usando OpenAI para generar respuesta")
+                
+                # Obtener información del lead y academia
+                lead_info = self._get_lead_info(lead_id)
+                academy_info = self._get_academy_info()
+                history = self._get_conversation_history(conv_id, limit=5)
+                
+                logger.info(f"[DEBUG] Lead: {lead_info['name']}, Conv ID: {conv_id}")
+                
+                # Construir prompt del sistema
+                system_prompt = self._build_system_prompt(academy_info, lead_info)
+                
+                # Construir mensajes para OpenAI
+                messages = [{"role": "system", "content": system_prompt}]
+                
+                # Agregar historial
+                for msg in history:
+                    role = "user" if msg['sender'] == 'user' else "assistant"
+                    messages.append({"role": role, "content": msg['content']})
+                
+                # Agregar mensaje actual
+                messages.append({"role": "user", "content": message})
+                
+                # Llamar a OpenAI
+                response = self.openai_client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature
+                )
+                
+                ai_response = response.choices[0].message.content
+                
+                logger.info(f"[SUCCESS] Respuesta generada: {len(ai_response)} caracteres")
+                
+                # DETECTAR INTENCIÓN DE AGENDAMIENTO
+                booking_detected = self._detect_booking_intent(message, ai_response, history)
+                
+                if booking_detected and self.scheduler:
+                    logger.info("[BOOKING] Intención de agendamiento detectada")
+                    
+                    # Intentar parsear la fecha/hora del mensaje
+                    parsed = self.scheduler.parse_appointment_request(message, lead_id)
+                    
+                    if parsed['parsed']:
+                        # Crear la semana de prueba
+                        result = self.scheduler.book_trial_week(
+                            lead_id,
+                            parsed.get('clase_tipo', 'adultos_jiujitsu'),
+                            f"Agendado via WhatsApp: {message}"
+                        )
+                        
+                        if result['success']:
+                            logger.info(f"[BOOKING] Semana de prueba registrada")
+                            return ai_response + "\n\n" + result['message']
+                        else:
+                            logger.warning(f"[BOOKING] Error: {result['message']}")
+                    else:
+                        logger.info("[BOOKING] No se pudo parsear fecha/hora")
+                
+                # Agregar CTA si es apropiado (solo si NO se agendó)
+                if self._should_add_booking_cta(ai_response, message) and not booking_detected:
+                    ai_response += self._get_booking_cta(academy_info)
+                
+                return ai_response
+                
+            except Exception as e:
+                logger.error(f"[ERROR] Fallo OpenAI: {e}")
+                # Continuar al fallback
+        
+        # FALLBACK: Solo si OpenAI falló o no está disponible
+        logger.warning("[FALLBACK] OpenAI no disponible, usando respuesta de emergencia")
+        return self._get_emergency_response(message)
+    
+    def _detect_booking_intent(self, user_message, ai_response, history):
+        """
+        Detecta si el usuario está intentando agendar una clase
+        """
+        msg_lower = user_message.lower()
+        
+        # Palabras clave de agendamiento
+        booking_keywords = ['agendar', 'reservar', 'apartar', 'quiero clase', 'mi nombre es', 
+                           'quiero una clase', 'clase el', 'clase para', 'semana de prueba']
+        has_booking_keyword = any(word in msg_lower for word in booking_keywords)
+        
+        # Verificar si tiene día de la semana
+        days = ['lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes', 
+                'sábado', 'sabado', 'mañana', 'hoy']
+        has_day = any(day in msg_lower for day in days)
+        
+        # Verificar si tiene hora
+        import re
+        has_time = bool(re.search(r'\d{1,2}:?\d{0,2}\s?(am|pm|hrs)?', msg_lower))
+        
+        # Verificar si respondió con nombre (formato: "Nombre Apellido")
+        name_pattern = bool(re.search(r'\b[A-Z][a-z]+\s+[A-Z][a-z]+', user_message))
+        
+        # Verificar en historial si ya se estaba hablando de agendamiento
+        discussing_booking = False
+        if history:
+            for msg in history[-5:]:
+                content_lower = msg['content'].lower()
+                if any(word in content_lower for word in ['agendar', 'reservar', 'semana de prueba', 
+                                                           'horario', 'clase para']):
+                    discussing_booking = True
+                    break
+        
+        # Lógica de detección
+        if has_booking_keyword and has_day and has_time:
+            return True
+        elif has_day and has_time and discussing_booking:
+            return True
+        elif name_pattern and has_day and has_time:
+            return True
+        elif name_pattern and discussing_booking:
+            return True
+        
+        return False
+    
+    def _build_system_prompt(self, academy_info, lead_info):
+        """Construir prompt del sistema usando academy_info.py"""
+        try:
+            from app.config.academy_info import get_system_prompt_base
+            base_prompt = get_system_prompt_base()
+        except ImportError:
+            logger.warning("No se pudo importar academy_info, usando prompt por defecto")
+            base_prompt = self._get_default_system_prompt(academy_info)
+        
+        # Agregar información del prospecto
+        lead_context = f"""
+
+CONTEXTO DEL PROSPECTO:
+- Nombre: {lead_info.get('name', 'No proporcionado')}
+- Teléfono: {lead_info.get('phone')}
+- Estado actual: {lead_info.get('status')}
+- Fuente: {lead_info.get('source', 'WhatsApp')}
+"""
+        
+        return base_prompt + lead_context
+    
+    def _get_default_system_prompt(self, academy_info):
+        """Prompt por defecto si no se puede importar academy_info"""
+        return f"""Sos "Mingo Asistente", parte del equipo de BJJ Mingo.
+
+📍 {academy_info.get('location', 'Santo Domingo de Heredia, Costa Rica')}
+📞 {academy_info.get('phone', '+506-8888-8888')}
+
+HORARIOS:
+- Jiu-Jitsu Adultos: Lunes a Viernes, 6:00 p.m.
+- Striking Adultos: Martes y Jueves, 7:30 p.m.
+- Kids (4-10 años): Martes y Jueves, 5:00 p.m.
+- Juniors (11-16 años): Lunes y Miércoles, 5:00 p.m.
+
+PRECIOS:
+- Adultos JJ: ₡33,000/mes
+- Adultos Striking: ₡25,000/mes
+- Combo: ₡43,000/mes
+- Niños: ₡30,000/mes
+
+🎁 SEMANA DE PRUEBA GRATIS
+
+INSTRUCCIONES:
+1. Usá voseo costarricense (vení, querés, tenés, podés)
+2. Sé amigable, empático y humano
+3. NO hagás bromas, pero sé simpático
+4. Recolectá datos paso a paso
+5. Siempre ofrecé fecha específica
+6. Mencioná que la semana de prueba es GRATIS
+"""
+    
+    def _get_emergency_response(self, message):
+        """Respuesta de emergencia cuando OpenAI no funciona"""
+        return (
+            "Disculpá, estoy teniendo problemas técnicos en este momento. 😅\n\n"
+            "Para no hacerte esperar:\n\n"
+            "📞 Llamános al: +506-8888-8888\n"
+            "💬 O decime tu nombre y número, y te llamamos\n\n"
+            "¡Queremos ayudarte a empezar tu SEMANA DE PRUEBA GRATIS! 🥋"
+        )
+    
+    def _should_add_booking_cta(self, response, user_message):
+        """Determinar si agregar CTA de agendamiento"""
+        booking_keywords = [
+            'agendar', 'clase', 'prueba', 'probar', 'visitar',
+            'conocer', 'inscribir', 'horario', 'semana'
+        ]
+        
+        response_lower = response.lower()
+        message_lower = user_message.lower()
+        
+        return any(keyword in response_lower or keyword in message_lower 
+                  for keyword in booking_keywords)
+    
+    def _get_booking_cta(self, academy_info):
+        """CTA para agendar"""
+        return (
+            f"\n\n📲 *Para agendar tu SEMANA DE PRUEBA GRATIS:*\n"
+            f"• Respondé con tu nombre completo y qué clase te interesa\n"
+            f"• O llamános al {academy_info.get('phone', '+506-8888-8888')}\n"
+            f"• También podés visitar la academia en Santo Domingo de Heredia"
+        )
+    
+    # ========== MÉTODOS DE BASE DE DATOS ==========
+    
+    def _get_or_create_lead(self, phone_number, name=None):
+        """Obtener o crear lead"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("SELECT * FROM lead WHERE phone_number = ?", (phone_number,))
+        cursor.execute("SELECT id, name FROM lead WHERE phone_number = ?", (phone_number,))
         lead = cursor.fetchone()
         
         if not lead:
             cursor.execute("""
                 INSERT INTO lead (academy_id, phone_number, name, source, status, interest_level)
                 VALUES (1, ?, ?, 'whatsapp', 'new', 5)
-            """, (phone_number, name or 'Usuario WhatsApp'))
+            """, (phone_number, name or 'WhatsApp User'))
             conn.commit()
             lead_id = cursor.lastrowid
         else:
@@ -45,13 +344,13 @@ class MessageHandler:
         conn.close()
         return lead_id
     
-    def get_or_create_conversation(self, lead_id):
+    def _get_or_create_conversation(self, lead_id):
         """Obtener o crear conversación"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT * FROM conversation 
+            SELECT id FROM conversation 
             WHERE lead_id = ? AND status = 'active'
         """, (lead_id,))
         conv = cursor.fetchone()
@@ -69,8 +368,8 @@ class MessageHandler:
         conn.close()
         return conv_id
     
-    def save_message(self, conv_id, sender, content, intent=None):
-        """Guardar mensaje en BD"""
+    def _save_message(self, conv_id, sender, content, intent=None):
+        """Guardar mensaje"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -82,202 +381,102 @@ class MessageHandler:
         conn.commit()
         conn.close()
     
-    def get_conversation_context(self, lead_id):
-        """Obtener contexto de la conversación"""
+    def _get_lead_info(self, lead_id):
+        """Obtener información del lead"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Verificar si estamos en proceso de agendamiento
         cursor.execute("""
-            SELECT m.content, m.sender, m.timestamp
-            FROM message m
-            JOIN conversation c ON m.conversation_id = c.id
-            WHERE c.lead_id = ? 
-            ORDER BY m.timestamp DESC
-            LIMIT 5
+            SELECT id, phone_number, name, status, interest_level, source
+            FROM lead WHERE id = ?
         """, (lead_id,))
         
-        recent_messages = cursor.fetchall()
+        row = cursor.fetchone()
+        conn.close()
         
-        # Verificar si ya tiene una cita
+        if row:
+            return {
+                'id': row[0],
+                'phone': row[1],
+                'name': row[2],
+                'status': row[3],
+                'interest_level': row[4],
+                'source': row[5]
+            }
+        return {}
+    
+    def _get_academy_info(self):
+        """Obtener información de la academia"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
         cursor.execute("""
-            SELECT appointment_datetime, status
-            FROM appointment
-            WHERE lead_id = ? AND status = 'scheduled'
-            ORDER BY created_at DESC
-            LIMIT 1
-        """, (lead_id,))
+            SELECT name, description, instructor_name, instructor_belt, 
+                   phone, address_street, address_city
+            FROM academy WHERE id = 1
+        """)
         
-        existing_appointment = cursor.fetchone()
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'name': row[0],
+                'description': row[1],
+                'instructor': f"{row[2]} ({row[3]})" if row[2] else 'Instructores certificados',
+                'phone': row[4],
+                'location': f"{row[5]}, {row[6]}" if row[5] and row[6] else 'Santo Domingo de Heredia, Costa Rica'
+            }
+        return {'name': 'BJJ Mingo', 'phone': '+506-8888-8888'}
+    
+    def _get_conversation_history(self, conv_id, limit=5):
+        """Obtener historial de conversación"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT sender, content, timestamp
+            FROM message
+            WHERE conversation_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """, (conv_id, limit))
+        
+        messages = []
+        for row in cursor.fetchall():
+            messages.append({
+                'sender': row[0],
+                'content': row[1],
+                'timestamp': row[2]
+            })
         
         conn.close()
         
-        return {
-            'recent_messages': recent_messages,
-            'has_appointment': existing_appointment is not None,
-            'appointment': existing_appointment
-        }
+        # Invertir para orden cronológico
+        messages.reverse()
+        return messages
     
-    def get_response(self, message, lead_id):
-        """Generar respuesta con manejo de agendamiento"""
-        
+    def _update_lead_status(self, lead_id, message):
+        """Actualizar estado del lead"""
         msg_lower = message.lower()
-        context = self.get_conversation_context(lead_id)
         
-        # Si ya tiene cita agendada
-        if context['has_appointment']:
-            dt_str = context['appointment'][0]
-            dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
-            
-            if 'cancelar' in msg_lower or 'cambiar' in msg_lower:
-                # Cancelar cita existente
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                cursor.execute("""
-                    UPDATE appointment 
-                    SET status = 'cancelled' 
-                    WHERE lead_id = ? AND status = 'scheduled'
-                """, (lead_id,))
-                conn.commit()
-                conn.close()
-                
-                return "✅ Tu cita ha sido cancelada. ¿Te gustaría agendar otra?", 'cancelar_cita'
-            else:
-                return f"Ya tienes una clase agendada para {dt.strftime('%A %d/%m a las %H:%M')}. \n\nSi necesitas cambiarla, escribe 'cancelar' primero.", 'recordatorio_cita'
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
         
-        # Detectar intención de agendar
-        agendar_keywords = ['agendar', 'clase', 'prueba', 'probar', 'reservar', 'apartar', 'horario']
-        wants_to_schedule = any(word in msg_lower for word in agendar_keywords)
-        
-        # Verificar si el mensaje anterior fue sobre horarios disponibles
-        showing_slots = False
-        if context['recent_messages']:
-            for msg in context['recent_messages']:
-                if msg[1] == 'bot' and 'Horarios disponibles' in msg[0]:
-                    showing_slots = True
-                    break
-        
-        # Si quiere agendar o pregunta por horarios
-        if wants_to_schedule and not showing_slots:
-            # Mostrar horarios disponibles
-            slots = self.scheduler.get_available_slots(days_ahead=5)
-            response = self.scheduler.format_available_slots_message(slots)
-            return response, 'mostrar_horarios'
-        
-        # Si ya mostramos horarios, intentar parsear la respuesta
-        elif showing_slots:
-            # Intentar interpretar el mensaje como fecha/hora
-            parsed = self.scheduler.parse_appointment_request(message, lead_id)
-            
-            if parsed['parsed']:
-                # Intentar agendar
-                result = self.scheduler.book_appointment(
-                    lead_id, 
-                    parsed['datetime'],
-                    f"Agendado via WhatsApp: {message}"
-                )
-                
-                if result['success']:
-                    response = result['message']
-                    if result['calendar_link']:
-                        response += f"\n\n📱 Agregar a Google Calendar:\n{result['calendar_link']}"
-                    response += "\n\n📍 Dirección: BJJ Academy, 123 Main St"
-                    response += "\n💡 Recuerda traer ropa cómoda y agua"
-                    
-                    return response, 'cita_confirmada'
-                else:
-                    return result['message'], 'error_agendamiento'
-            else:
-                # No se pudo interpretar
-                return "No entendí la fecha/hora. Por favor responde con algo como:\n• 'Mañana a las 6pm'\n• 'Lunes 18:00'\n• 'Sábado 9am'", 'fecha_no_clara'
-        
-        # Si OpenAI está disponible
-        if self.use_openai:
-            try:
-                import openai
-                
-                # Agregar contexto de agendamiento al prompt
-                prompt = f"""Eres un asistente de BJJ Academy. Responde en español de forma amigable y breve.
-                
-                Mensaje del usuario: {message}
-                
-                Información de la academia:
-                - Clases de Brazilian Jiu-Jitsu para todos los niveles
-                - Precio mensual: $50
-                - Primera clase gratis
-                - Horarios: Lun-Vie 7am, 12pm, 6pm, 8pm. Sábados 9am, 11am
-                
-                Si el usuario quiere agendar una clase, responde que puede escribir 'quiero agendar una clase'.
-                
-                Responde de forma natural y útil."""
-                
-                response = openai.Completion.create(
-                    model="gpt-3.5-turbo-instruct",
-                    prompt=prompt,
-                    max_tokens=150,
-                    temperature=0.7
-                )
-                
-                return response.choices[0].text.strip(), 'openai_response'
-                
-            except Exception as e:
-                print(f"Error OpenAI: {e}")
-        
-        # Respuestas predefinidas estándar
-        intent = None
-        
-        if any(word in msg_lower for word in ['hola', 'hi', 'buenas', 'buen']):
-            intent = 'saludo'
-            response = "¡Hola! 👋 Bienvenido a BJJ Academy. ¿Te interesa conocer sobre nuestras clases de Jiu-Jitsu?"
-        elif any(word in msg_lower for word in ['precio', 'costo', 'cuanto', 'pagar']):
-            intent = 'precio'
-            response = "💰 Nuestras membresías:\n• Mensual: $50\n• Primera clase GRATIS\n\n¿Te gustaría agendar tu clase de prueba? Escribe 'quiero agendar una clase'"
-        elif any(word in msg_lower for word in ['info', 'información', 'informacion', 'saber']):
-            intent = 'informacion'
-            response = "📋 En BJJ Academy ofrecemos:\n• Clases para todos los niveles\n• Instructores certificados\n• Primera clase gratis\n• Ambiente familiar\n\n¿Quieres agendar una clase de prueba?"
+        # Si muestra interés en clase
+        if any(word in msg_lower for word in ['agendar', 'clase', 'prueba', 'probar', 'semana']):
+            cursor.execute("""
+                UPDATE lead 
+                SET status = 'interested', interest_level = 8
+                WHERE id = ? AND status != 'scheduled'
+            """, (lead_id,))
+        # Si es primera interacción
         else:
-            intent = 'default'
-            response = "Gracias por tu mensaje. ¿En qué puedo ayudarte?\n\n• Escribe 'precios' para información de costos\n• Escribe 'quiero agendar' para reservar tu clase gratis\n• Escribe 'info' para conocer más sobre nosotros"
+            cursor.execute("""
+                UPDATE lead 
+                SET status = 'contacted'
+                WHERE id = ? AND status = 'new'
+            """, (lead_id,))
         
-        return response, intent
-    
-    def process_message(self, phone_number, message, name=None):
-        """Procesar mensaje completo con agendamiento"""
-        
-        # 1. Obtener o crear lead
-        lead_id = self.get_or_create_lead(phone_number, name)
-        
-        # 2. Obtener o crear conversación
-        conv_id = self.get_or_create_conversation(lead_id)
-        
-        # 3. Guardar mensaje del usuario
-        self.save_message(conv_id, 'user', message)
-        
-        # 4. Generar respuesta con lógica de agendamiento
-        response, intent = self.get_response(message, lead_id)
-        
-        # 5. Guardar respuesta del bot
-        self.save_message(conv_id, 'bot', response, intent)
-        
-        # 6. Actualizar lead según la intención
-        if intent in ['mostrar_horarios', 'cita_confirmada']:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            if intent == 'mostrar_horarios':
-                cursor.execute("""
-                    UPDATE lead 
-                    SET status = 'interested', interest_level = 8 
-                    WHERE id = ?
-                """, (lead_id,))
-            elif intent == 'cita_confirmada':
-                cursor.execute("""
-                    UPDATE lead 
-                    SET status = 'scheduled', interest_level = 10 
-                    WHERE id = ?
-                """, (lead_id,))
-            
-            conn.commit()
-            conn.close()
-        
-        return response
+        conn.commit()
+        conn.close()
