@@ -7,7 +7,6 @@ from flask import Blueprint, request, jsonify, Response
 from twilio.twiml.messaging_response import MessagingResponse
 from app.models import db, Lead, Conversation, Message, Academy
 from app.services.message_processor import MessageProcessor
-from app.services.openai_service import OpenAIService
 import logging
 
 # Configurar logging
@@ -18,8 +17,7 @@ logger = logging.getLogger(__name__)
 whatsapp_bp = Blueprint('whatsapp', __name__)
 
 # Inicializar servicios
-openai_service = OpenAIService()
-message_processor = MessageProcessor(openai_service)
+message_processor = MessageProcessor()
 
 @whatsapp_bp.route('/webhook/whatsapp', methods=['GET', 'POST'])
 def whatsapp_webhook():

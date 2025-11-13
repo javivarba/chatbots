@@ -151,18 +151,18 @@ class MessageHandler:
                 )
                 
                 ai_response = response.choices[0].message.content
-                
+
                 logger.info(f"[SUCCESS] Respuesta generada: {len(ai_response)} caracteres")
-                
+
                 # DETECTAR INTENCIÓN DE AGENDAMIENTO
                 booking_detected = self._detect_booking_intent(message, ai_response, history)
-                
+
                 if booking_detected and self.scheduler:
                     logger.info("[BOOKING] Intención de agendamiento detectada")
-                    
+
                     # Intentar parsear la fecha/hora del mensaje
                     parsed = self.scheduler.parse_appointment_request(message, lead_id)
-                    
+
                     if parsed['parsed']:
                         # Crear la semana de prueba
                         result = self.scheduler.book_trial_week(
@@ -170,7 +170,7 @@ class MessageHandler:
                             parsed.get('clase_tipo', 'adultos_jiujitsu'),
                             f"Agendado via WhatsApp: {message}"
                         )
-                        
+
                         if result['success']:
                             logger.info(f"[BOOKING] Semana de prueba registrada")
                             return ai_response + "\n\n" + result['message']
@@ -178,11 +178,8 @@ class MessageHandler:
                             logger.warning(f"[BOOKING] Error: {result['message']}")
                     else:
                         logger.info("[BOOKING] No se pudo parsear fecha/hora")
-                
-                # Agregar CTA si es apropiado (solo si NO se agendó)
-                if self._should_add_booking_cta(ai_response, message) and not booking_detected:
-                    ai_response += self._get_booking_cta(academy_info)
-                
+
+                # OpenAI ahora maneja el CTA de forma natural - no agregamos nada automáticamente
                 return ai_response
                 
             except Exception as e:
@@ -297,28 +294,6 @@ INSTRUCCIONES:
             "📞 Llamános al: +506-8888-8888\n"
             "💬 O decime tu nombre y número, y te llamamos\n\n"
             "¡Queremos ayudarte a empezar tu SEMANA DE PRUEBA GRATIS! 🥋"
-        )
-    
-    def _should_add_booking_cta(self, response, user_message):
-        """Determinar si agregar CTA de agendamiento"""
-        booking_keywords = [
-            'agendar', 'clase', 'prueba', 'probar', 'visitar',
-            'conocer', 'inscribir', 'horario', 'semana'
-        ]
-        
-        response_lower = response.lower()
-        message_lower = user_message.lower()
-        
-        return any(keyword in response_lower or keyword in message_lower 
-                  for keyword in booking_keywords)
-    
-    def _get_booking_cta(self, academy_info):
-        """CTA para agendar"""
-        return (
-            f"\n\n📲 *Para agendar tu SEMANA DE PRUEBA GRATIS:*\n"
-            f"• Respondé con tu nombre completo y qué clase te interesa\n"
-            f"• O llamános al {academy_info.get('phone', '+506-8888-8888')}\n"
-            f"• También podés visitar la academia en Santo Domingo de Heredia"
         )
     
     # ========== MÉTODOS DE BASE DE DATOS ==========

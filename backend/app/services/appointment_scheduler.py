@@ -1,6 +1,7 @@
 """
 Appointment Scheduler Simplificado para BJJ Mingo
 Versión actualizada con horarios reales y sistema de semana de prueba
+Incluye notificaciones automáticas al staff
 """
 
 import sqlite3
@@ -14,6 +15,15 @@ logger = logging.getLogger(__name__)
 class AppointmentScheduler:
     def __init__(self):
         self.db_path = 'bjj_academy.db'
+
+        # Inicializar servicio de notificaciones
+        try:
+            from app.services.notification_service import NotificationService
+            self.notifier = NotificationService()
+            logger.info("✅ NotificationService integrado en AppointmentScheduler")
+        except Exception as e:
+            logger.warning(f"⚠️ NotificationService no disponible: {e}")
+            self.notifier = None
         
         # Horarios REALES de BJJ Mingo
         self.horarios = {
@@ -163,54 +173,84 @@ class AppointmentScheduler:
     def book_trial_week(self, lead_id, clase_tipo, notes=None):
         """
         Registra una semana de prueba para un prospecto
+        NUEVO: Envía notificación al staff en lugar de link de calendario al cliente
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-    
-    # Verificar si ya tiene una semana de prueba activa
+
+        # Verificar si ya tiene una semana de prueba activa
         cursor.execute("""
-            SELECT COUNT(*) FROM trial_week 
+            SELECT COUNT(*) FROM trial_weeks
             WHERE lead_id = ? AND status = 'active'
         """, (lead_id,))
-    
+
         if cursor.fetchone()[0] > 0:
             conn.close()
             return {
                 'success': False,
                 'message': 'Ya tenés una semana de prueba activa.'
             }
-    
+
         start_date = datetime.now()
         end_date = start_date + timedelta(days=7)
-    
+
         try:
-        # Registrar la semana de prueba
+            # Registrar la semana de prueba
             cursor.execute("""
-                INSERT INTO trial_week 
+                INSERT INTO trial_weeks
                 (lead_id, clase_tipo, start_date, end_date, status, notes)
                 VALUES (?, ?, ?, ?, 'active', ?)
-            """, (lead_id, clase_tipo, start_date.strftime('%Y-%m-%d'), 
-                    end_date.strftime('%Y-%m-%d'), notes))
-        
-        # Actualizar status del lead
+            """, (lead_id, clase_tipo, start_date.strftime('%Y-%m-%d'),
+                  end_date.strftime('%Y-%m-%d'), notes))
+
+            trial_id = cursor.lastrowid
+
+            # Actualizar status del lead
             cursor.execute("""
-                UPDATE lead 
-                SET status = 'trial_scheduled', interest_level = 9 
+                UPDATE leads
+                SET status = 'trial_scheduled', lead_score = 9
                 WHERE id = ?
             """, (lead_id,))
-        
+
             conn.commit()
-        
-        # Preparar mensaje de confirmación
+
+            # Obtener información del lead para la notificación
+            cursor.execute("""
+                SELECT phone, name FROM leads WHERE id = ?
+            """, (lead_id,))
+            lead_data = cursor.fetchone()
+            conn.close()
+
+            # Preparar información para notificación
             horario = self.horarios[clase_tipo]
             dias_texto = self._get_dias_texto(horario['dias'])
-        
-        # Calcular la próxima clase (primer día disponible)
             next_class_date = self._get_next_class_date(clase_tipo)
-        
-        # Generar link de Google Calendar
-            calendar_link = self.generate_calendar_link(next_class_date, horario['nombre'])
-        
+
+            # NUEVO: Enviar notificación al staff de la academia
+            if self.notifier:
+                lead_info = {
+                    'name': lead_data[1] if lead_data else 'No proporcionado',
+                    'phone': lead_data[0] if lead_data else 'No proporcionado',
+                    'status': 'trial_scheduled'
+                }
+
+                trial_info = {
+                    'clase_nombre': horario['nombre'],
+                    'start_date': start_date.strftime('%Y-%m-%d'),
+                    'dias_texto': dias_texto,
+                    'hora': horario['hora'],
+                    'notes': notes or 'Agendado vía WhatsApp'
+                }
+
+                # Enviar notificación
+                notification_result = self.notifier.notify_new_trial_booking(lead_info, trial_info)
+
+                if notification_result['success']:
+                    logger.info(f"✅ Notificación enviada al staff para lead {lead_id}")
+                else:
+                    logger.warning(f"⚠️ No se pudo enviar notificación: {notification_result['message']}")
+
+            # Mensaje de confirmación para el cliente (SIN link de calendario)
             confirmation = f"""✅ ¡SEMANA DE PRUEBA CONFIRMADA!
 
 📋 Detalles:
@@ -219,9 +259,6 @@ class AppointmentScheduler:
 - Hora: {horario['hora']}
 - Primera clase: {next_class_date.strftime('%A %d/%m/%Y')}
 - Válido hasta: {end_date.strftime('%d/%m/%Y')}
-
-📅 Agregar a tu calendario:
-{calendar_link}
 
 📍 Ubicación: Santo Domingo de Heredia
 🗺️ Waze: https://waze.com/ul/hd1u0y3qpc
@@ -232,19 +269,18 @@ class AppointmentScheduler:
 - Agua
 - Si tenés gi, podés traerlo
 
+🎯 *La academia te contactará pronto para confirmar tu asistencia.*
+
 📞 Cualquier duda: {self._get_phone()}
 
 ¡Te esperamos! 🥋"""
-        
-            conn.close()
-        
+
             return {
                 'success': True,
                 'message': confirmation,
-                'trial_id': cursor.lastrowid,
-                'calendar_link': calendar_link
+                'trial_id': trial_id
             }
-        
+
         except Exception as e:
             conn.close()
             logger.error(f"Error registrando semana de prueba: {e}")
@@ -261,7 +297,7 @@ class AppointmentScheduler:
         """Obtiene el teléfono de la academia"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT phone FROM academy WHERE id = 1")
+        cursor.execute("SELECT phone FROM academies WHERE id = 1")
         result = cursor.fetchone()
         conn.close()
         return result[0] if result else '+506-8888-8888'
@@ -300,37 +336,14 @@ class AppointmentScheduler:
         """Calcula la fecha de la próxima clase disponible"""
         horario = self.horarios[clase_tipo]
         today = datetime.now()
-    
+
         for i in range(1, 14):  # Buscar en los próximos 14 días
             date = today + timedelta(days=i)
             day_of_week = date.weekday() + 1
-        
+
             if day_of_week in horario['dias']:
                 # Crear datetime con la hora de la clase
                 hora_partes = horario['hora'].split(':')
                 return date.replace(hour=int(hora_partes[0]), minute=int(hora_partes[1]))
-    
-        return today  # Fallback
 
-    def generate_calendar_link(self, dt, clase_nombre):
-        """Generar link para agregar a Google Calendar"""
-        # Formato: YYYYMMDDTHHmmss
-        start = dt.strftime('%Y%m%dT%H%M%S')
-        end = (dt + timedelta(hours=1, minutes=30)).strftime('%Y%m%dT%H%M%S')
-    
-        title = f"Clase de Prueba - {clase_nombre}"
-        details = f"Tu primera clase en BJJ Mingo. ¡Traé ropa cómoda y agua!"
-        location = "Santo Domingo de Heredia, Costa Rica"
-    
-        # Crear URL de Google Calendar
-        base_url = "https://calendar.google.com/calendar/render?action=TEMPLATE"
-    
-        # Encode los valores
-        import urllib.parse
-        title_encoded = urllib.parse.quote(title)
-        details_encoded = urllib.parse.quote(details)
-        location_encoded = urllib.parse.quote(location)
-    
-        url = f"{base_url}&text={title_encoded}&dates={start}/{end}&details={details_encoded}&location={location_encoded}"
-    
-        return url
+        return today  # Fallback

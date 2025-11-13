@@ -106,11 +106,9 @@ class AIService:
             )
             
             ai_response = response.choices[0].message.content
-            
-            # Verificar si la respuesta sugiere agendar
-            if self._should_add_booking_link(ai_response, message):
-                ai_response += self._get_booking_cta(academy)
-            
+
+            # OpenAI ahora maneja el CTA de forma natural - no agregamos nada automáticamente
+
             logger.info(f"Respuesta generada exitosamente: {len(ai_response)} caracteres")
             
             # Actualizar métricas (opcional)
@@ -206,24 +204,24 @@ INSTRUCCIONES:
             return False, f"Error: {str(e)}"
 
     def _get_conversation_history(
-        self, 
-        conversation: Conversation, 
+        self,
+        conversation: Conversation,
         limit: int = 10
     ) -> List[Dict[str, str]]:
         """
         Obtiene el historial de conversación para contexto
         """
         history = []
-        
+
         try:
             # Obtener últimos mensajes
             recent_messages = Message.query.filter_by(
                 conversation_id=conversation.id
             ).order_by(Message.created_at.desc()).limit(limit).all()
-            
+
             # Invertir para orden cronológico
             recent_messages.reverse()
-            
+
             for msg in recent_messages:
                 role = "user" if msg.direction == "inbound" else "assistant"
                 history.append({
@@ -232,34 +230,8 @@ INSTRUCCIONES:
                 })
         except Exception as e:
             logger.warning(f"Error obteniendo historial: {e}")
-        
+
         return history
-    
-    def _should_add_booking_link(self, response: str, user_message: str) -> bool:
-        """
-        Determina si debe agregar un link de booking
-        """
-        booking_keywords = [
-            'agendar', 'semana de prueba', 'probar', 'visitar',
-            'conocer', 'inscribir', 'horario disponible', 'clase'
-        ]
-        
-        response_lower = response.lower()
-        message_lower = user_message.lower()
-        
-        return any(keyword in response_lower or keyword in message_lower 
-                  for keyword in booking_keywords)
-    
-    def _get_booking_cta(self, academy: Academy) -> str:
-        """
-        Obtiene el Call-to-Action para agendar
-        """
-        return (
-            f"\n\n📲 *Para agendar tu SEMANA DE PRUEBA GRATIS:*\n"
-            f"• Respondé con tu nombre completo y qué clase te interesa\n"
-            f"• O llamános al {academy.phone}\n"
-            f"• También podés visitar directamente la academia en Santo Domingo de Heredia"
-        )
     
     def _get_fallback_response(self, message: str, academy: Academy) -> str:
         """
