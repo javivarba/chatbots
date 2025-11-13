@@ -1,0 +1,172 @@
+================================================================================
+GUIA PASO A PASO - CONFIGURAR TWILIO SANDBOX PARA NOTIFICACIONES
+BJJ MINGO - Sistema de Notificaciones WhatsApp
+================================================================================
+
+ESTADO ACTUAL:
+- Cuenta Twilio: ACef289d5e1f787e4cc365962d535457e7
+- Status: ACTIVE (Trial)
+- Numero a notificar: +50670150369
+
+IMPORTANTE: Como ya usaste +50670150369 para hacer testing, es posible que
+ya este registrado en el Sandbox de Twilio. Vamos a verificarlo y configurarlo.
+
+================================================================================
+PASO 1: ACCEDER AL TWILIO SANDBOX
+================================================================================
+
+1. Abre tu navegador
+2. Ve a: https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn
+3. Inicia sesion con tu cuenta de Twilio si te lo pide
+
+================================================================================
+PASO 2: ENCONTRAR TU CODIGO DE SANDBOX
+================================================================================
+
+En la pagina del Sandbox, veras algo como esto:
+
+   +----------------------------------------------------------+
+   |  Try WhatsApp                                            |
+   +----------------------------------------------------------+
+   |                                                          |
+   |  To connect your sandbox, send this message:            |
+   |                                                          |
+   |     join [CODIGO-UNICO]                                 |
+   |                                                          |
+   |  To this number:                                        |
+   |                                                          |
+   |     +1 415 523 8886  (o similar)                        |
+   |                                                          |
+   +----------------------------------------------------------+
+
+ANOTA AQUI:
+- Codigo de Sandbox: join climate-decide
+- Numero de WhatsApp: ++14155238886
+
+================================================================================
+PASO 3: REGISTRAR TU NUMERO EN EL SANDBOX
+================================================================================
+
+DESDE EL WHATSAPP DEL NUMERO +50670150369:
+
+1. Abre WhatsApp
+2. Crea un nuevo chat
+3. Envia mensaje al numero que anotaste arriba (ej: +1 415 523 8886)
+4. El mensaje debe ser EXACTAMENTE: join [tu-codigo]
+   Ejemplo: join animal-cat
+
+5. ESPERA la respuesta de Twilio (deberia llegar en segundos)
+
+Recibiras un mensaje como:
+   "Congratulations! You're all set to send messages from your
+   sandbox number..."
+
+6. Si recibes ese mensaje: EXITO! Tu numero esta registrado
+
+7. Si NO recibes respuesta, verifica que:
+   - El numero sea correcto
+   - El mensaje sea exactamente "join [codigo]"
+   - Tengas conexion a internet en WhatsApp
+
+================================================================================
+PASO 4: OBTENER EL NUMERO CORRECTO DEL SANDBOX
+================================================================================
+
+De vuelta en la pagina de Twilio Console:
+https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn
+
+Busca la seccion que dice:
+   "Your Sandbox Phone Number"
+   o "Sandbox Number"
+
+El numero puede ser:
+   +1 415 523 8886
+   +1 202 759 9459
+   u otro numero de USA
+
+COPIA EXACTAMENTE ese numero (incluye el +1)
+
+ANOTA AQUI: +14155238886
+
+================================================================================
+PASO 5: ACTUALIZAR EL ARCHIVO .ENV
+================================================================================
+
+1. Abre el archivo: backend/.env
+2. Busca la linea que dice:
+   TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
+
+3. Reemplaza con el numero que copiaste, por ejemplo si tu numero es +1 415 523 8886:
+   TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
+
+   IMPORTANTE:
+   - Debe tener "whatsapp:" al inicio
+   - NO debe tener espacios
+   - Debe tener el + y todos los digitos
+
+4. Guarda el archivo
+
+================================================================================
+PASO 6: PROBAR LA CONFIGURACION
+================================================================================
+
+1. Abre la terminal/PowerShell
+2. Navega a la carpeta backend:
+   cd "c:\Users\javiv\OneDrive\Desktop\Proyectos\bjj-chatbot\bjj-academy-bot\backend"
+
+3. Ejecuta:
+   python quick_test.py
+
+4. Si todo esta bien, deberas ver:
+   [OK] Notificacion enviada exitosamente!
+   Twilio SID: SM...
+
+5. Y en tu WhatsApp (+50670150369) deberas recibir un mensaje con:
+   "NUEVO PROSPECTO - SEMANA DE PRUEBA"
+
+================================================================================
+SI ALGO FALLA
+================================================================================
+
+ERROR: "not a valid phone number"
+SOLUCION: Verifica que el numero en .env tenga el formato correcto:
+          whatsapp:+14155238886 (sin espacios)
+
+ERROR: "Unable to create record"
+SOLUCION: El numero +50670150369 no esta registrado en el Sandbox.
+          Repite el PASO 3 y asegurate de recibir confirmacion de Twilio.
+
+ERROR: No recibo el mensaje de confirmacion de Twilio
+SOLUCION:
+  1. Verifica que el numero sea correcto
+  2. Intenta "leave" y luego "join [codigo]" de nuevo
+  3. Espera 1 minuto y reintenta
+
+================================================================================
+VERIFICACION FINAL
+================================================================================
+
+Una vez que recibas la notificacion de prueba en tu WhatsApp:
+
+[X] Recibiste mensaje de confirmacion de Twilio Sandbox
+[X] Actualizaste el .env con el numero correcto
+[X] Ejecutaste python quick_test.py
+[X] Recibiste la notificacion de prueba en WhatsApp
+
+SI TODOS ESTAN MARCADOS: EXITO!
+
+Tu sistema de notificaciones esta completamente funcional.
+
+Cada vez que un cliente agende una clase de prueba, recibiras
+automaticamente un WhatsApp en +50670150369 con todos los detalles.
+
+================================================================================
+SOPORTE
+================================================================================
+
+Si necesitas ayuda:
+1. Revisa los logs: grep "NotificationService" logs/app.log
+2. Consulta: TWILIO_SETUP.md en la carpeta backend
+3. Documentacion Twilio: https://www.twilio.com/docs/whatsapp/sandbox
+
+================================================================================

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(rm:*)",
+      "Bash(tree:*)",
+      "Bash(git rm:*)",
+      "Bash(dir \"%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\" /b)",
+      "Bash(findstr:*)",
+      "Read(//c/Users/javiv/AppData/Local/Microsoft/WinGet/Packages/Ngrok.Ngrok_Microsoft.Winget.Source_8wekyb3d8bbwe/**)",
+      "Read(//c/Users/javiv/AppData/Local/Microsoft/WinGet/Links/**)",
+      "Bash(C:/Users/javiv/AppData/Local/Programs/Python/Python313/python.exe backend/test_complete_flow.py)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

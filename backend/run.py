@@ -1,8 +1,8 @@
-﻿from app import create_app
+from app import create_app
 
-app = create_app('default')
+app = create_app()
 
 if __name__ == '__main__':
-    print('Starting BJJ Academy Bot API...')
-    print('Navigate to http://localhost:5000')
-    app.run(debug=True, host='127.0.0.1', port=5000)
+    print("Starting Flask server...")
+    print("Server running on http://localhost:5000")
+    app.run(host='0.0.0.0', port=5000, debug=True)

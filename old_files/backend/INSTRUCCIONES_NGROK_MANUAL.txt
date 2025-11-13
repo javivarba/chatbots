@@ -1,0 +1,214 @@
+================================================================================
+INSTRUCCIONES PARA INSTALAR NGROK MANUALMENTE
+BJJ Mingo - Sistema de Notificaciones WhatsApp
+================================================================================
+
+PROBLEMA DETECTADO:
+Windows Defender está bloqueando ngrok porque lo detecta como "potencialmente
+no deseado". Esto es un FALSO POSITIVO común con herramientas de túnel.
+
+================================================================================
+SOLUCION - INSTALACION MANUAL (5 MINUTOS)
+================================================================================
+
+PASO 1: DESACTIVAR TEMPORALMENTE LA PROTECCION EN TIEMPO REAL
+--------------------------------------------------------------
+1. Abre "Seguridad de Windows" (Windows Security)
+2. Ve a "Protección contra virus y amenazas"
+3. Click en "Administrar configuración"
+4. DESACTIVA temporalmente "Protección en tiempo real"
+   (Se reactivará sola en 15 minutos)
+
+PASO 2: DESCARGAR NGROK
+------------------------
+1. Abre tu navegador
+2. Ve a: https://ngrok.com/download
+3. Click en "Download for Windows (64-bit)"
+4. Se descargará: ngrok-v3-stable-windows-amd64.zip
+
+PASO 3: EXTRAER NGROK
+----------------------
+1. Ve a tu carpeta de Descargas
+2. Encuentra: ngrok-v3-stable-windows-amd64.zip
+3. Click derecho → "Extraer todo..."
+4. Extrae a: C:\ngrok\
+   (Crea la carpeta C:\ngrok si no existe)
+
+PASO 4: AGREGAR EXCEPCION EN WINDOWS DEFENDER
+----------------------------------------------
+1. Abre "Seguridad de Windows"
+2. Ve a "Protección contra virus y amenazas"
+3. Click en "Administrar configuración"
+4. Baja hasta "Exclusiones"
+5. Click en "Agregar o quitar exclusiones"
+6. Click en "Agregar una exclusión" → "Carpeta"
+7. Selecciona: C:\ngrok
+8. Click "Seleccionar carpeta"
+
+PASO 5: REACTIVAR PROTECCION EN TIEMPO REAL
+--------------------------------------------
+1. Vuelve a "Seguridad de Windows"
+2. "Protección contra virus y amenazas"
+3. "Administrar configuración"
+4. ACTIVA "Protección en tiempo real"
+
+PASO 6: VERIFICAR INSTALACION
+------------------------------
+Abre PowerShell y ejecuta:
+
+    C:\ngrok\ngrok.exe version
+
+Deberías ver algo como: "ngrok version 3.x.x"
+
+================================================================================
+CONFIGURAR NGROK
+================================================================================
+
+PASO 7: CREAR CUENTA EN NGROK (GRATIS)
+---------------------------------------
+1. Ve a: https://dashboard.ngrok.com/signup
+2. Regístrate con tu email
+3. Verifica tu email
+
+PASO 8: OBTENER AUTHTOKEN
+--------------------------
+1. Inicia sesión en: https://dashboard.ngrok.com
+2. Ve a: https://dashboard.ngrok.com/get-started/your-authtoken
+3. COPIA tu authtoken (algo como: 2abc...xyz)
+
+PASO 9: CONFIGURAR AUTHTOKEN
+-----------------------------
+En PowerShell:
+
+    C:\ngrok\ngrok.exe config add-authtoken TU_AUTHTOKEN_AQUI
+
+Reemplaza TU_AUTHTOKEN_AQUI con el token que copiaste.
+
+================================================================================
+USAR NGROK CON EL CHATBOT
+================================================================================
+
+TERMINAL 1 - INICIAR FLASK:
+----------------------------
+cd "C:\Users\javiv\OneDrive\Desktop\Proyectos\bjj-chatbot\bjj-academy-bot\backend"
+python app.py
+
+Deberías ver:
+ * Running on http://127.0.0.1:5000
+
+TERMINAL 2 - INICIAR NGROK:
+----------------------------
+C:\ngrok\ngrok.exe http 5000
+
+Deberías ver algo como:
+
+    Session Status                online
+    Forwarding                    https://abc-123.ngrok-free.app -> http://localhost:5000
+
+IMPORTANTE: COPIA la URL de "Forwarding" (ej: https://abc-123.ngrok-free.app)
+
+================================================================================
+CONFIGURAR TWILIO WEBHOOK
+================================================================================
+
+PASO 10: CONFIGURAR WEBHOOK EN TWILIO
+--------------------------------------
+1. Ve a: https://console.twilio.com/us1/develop/sms/settings/whatsapp-sandbox
+
+2. En "WHEN A MESSAGE COMES IN", pega tu URL de ngrok + /webhook/whatsapp:
+
+   https://abc-123.ngrok-free.app/webhook/whatsapp
+
+3. Método: POST
+
+4. Click "Save"
+
+================================================================================
+PROBAR EL SISTEMA COMPLETO
+================================================================================
+
+PASO 11: ENVIAR MENSAJE DE PRUEBA
+----------------------------------
+Desde el WhatsApp del número +50670150369:
+
+1. Envía un mensaje al número del Sandbox de Twilio (ej: +1 415 523 8886)
+2. Mensaje: "Hola, quiero información sobre las clases"
+
+PASO 12: VERIFICAR QUE FUNCIONE
+--------------------------------
+Deberías ver:
+
+✅ Respuesta del bot en WhatsApp
+✅ En los logs de Flask verás el mensaje procesado
+✅ En ngrok (http://127.0.0.1:4040) verás las peticiones
+
+PASO 13: AGENDAR CLASE DE PRUEBA
+---------------------------------
+Continúa la conversación y menciona que querés agendar:
+"Quiero agendar una clase de prueba para el lunes"
+
+Cuando el sistema detecte el agendamiento:
+✅ El bot te confirmará la clase
+✅ Recibirás una notificación en +50670150369 con los datos del prospecto
+
+================================================================================
+SOLUCIÓN DE PROBLEMAS
+================================================================================
+
+ERROR: "ngrok.exe no se reconoce como comando"
+SOLUCION: Usa la ruta completa: C:\ngrok\ngrok.exe http 5000
+
+ERROR: Windows Defender sigue bloqueando
+SOLUCION:
+1. Verifica que agregaste la exclusión para C:\ngrok
+2. Si el archivo fue eliminado, restaura desde cuarentena:
+   - Seguridad de Windows → Protección contra virus y amenazas
+   - Historial de protección → Elementos en cuarentena
+   - Busca ngrok.exe → Restaurar
+
+ERROR: "authentication failed" en ngrok
+SOLUCION: Configura tu authtoken con el comando del PASO 9
+
+ERROR: Twilio no puede conectarse a ngrok
+SOLUCION:
+1. Verifica que Flask esté corriendo (http://localhost:5000)
+2. Verifica que ngrok esté corriendo
+3. Verifica que la URL en Twilio sea correcta y termine en /webhook/whatsapp
+4. Prueba la URL en tu navegador para ver si responde
+
+ERROR: No recibo notificaciones cuando alguien agenda
+SOLUCION:
+1. Verifica que completaste la configuración del Twilio Sandbox (CONFIGURAR_SANDBOX.txt)
+2. Verifica que +50670150369 esté registrado en el Sandbox
+3. Revisa los logs: python quick_test.py
+
+================================================================================
+RESUMEN DE COMANDOS RAPIDOS
+================================================================================
+
+# Verificar ngrok instalado
+C:\ngrok\ngrok.exe version
+
+# Configurar authtoken (solo una vez)
+C:\ngrok\ngrok.exe config add-authtoken TU_TOKEN
+
+# Iniciar Flask
+cd backend
+python app.py
+
+# Iniciar ngrok (en otra terminal)
+C:\ngrok\ngrok.exe http 5000
+
+# Probar notificaciones
+cd backend
+python quick_test.py
+
+================================================================================
+SOPORTE
+================================================================================
+
+Documentación ngrok: https://ngrok.com/docs
+Twilio WhatsApp: https://www.twilio.com/docs/whatsapp
+Sistema de notificaciones: Ver NOTIFICATION_SYSTEM.md en carpeta backend
+
+================================================================================

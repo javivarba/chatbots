@@ -1,203 +1,283 @@
-# 🥋 BJJ Academy Bot
+# BJJ Academy WhatsApp Bot 🥋
 
-Sistema de chatbot inteligente para academias de Brazilian Jiu-Jitsu que automatiza la atención al cliente y gestión de leads a través de WhatsApp, Facebook e Instagram.
+> Sistema automatizado de gestión de leads y agendamiento de clases para academias de Brazilian Jiu-Jitsu
 
-## 🎯 Features
+## 📋 Descripción
 
-- ✅ Respuestas automáticas inteligentes con IA (OpenAI/Claude)
-- ✅ Gestión de leads y seguimiento automático
-- ✅ Agendamiento de clases de prueba
-- ✅ Multi-tenant (múltiples academias)
-- ✅ Dashboard de analytics
-- ✅ Integraciones con calendario (Cal.com/Google Calendar)
+Bot inteligente de WhatsApp que automatiza la atención al cliente, captura de leads y agendamiento de clases de prueba para academias de BJJ. Utiliza IA (OpenAI GPT-3.5) para respuestas naturales y cuenta con un dashboard administrativo completo.
 
-## 🛠️ Tech Stack
+## ✨ Características Principales
 
-- **Backend**: Python 3.11+ / Flask
-- **Database**: PostgreSQL
-- **Cache**: Redis
-- **Queue**: Celery
-- **AI**: OpenAI GPT-3.5/4
-- **Container**: Docker
-- **Testing**: Pytest
+### 🤖 Bot de WhatsApp
+- **Respuestas Inteligentes**: Integración con OpenAI GPT-3.5 para conversaciones naturales
+- **Detección de Intenciones**: Identifica automáticamente interés en clases, precios, horarios
+- **Multiidioma**: Responde en español de forma natural y contextual
+- **Fallback Automático**: Respuestas predefinidas cuando OpenAI no está disponible
 
-## 🚀 Quick Start
+### 📊 Sistema de Leads
+- **Captura Automática**: Cada conversación genera un lead en la base de datos
+- **Scoring de Interés**: Califica leads del 1-10 según su interacción
+- **Estados Dinámicos**: new → interested → scheduled → customer
+- **Historial Completo**: Guarda todas las conversaciones
 
-### Prerequisitos
+### 📅 Agendamiento Inteligente
+- **Interpretación Natural**: Entiende "mañana a las 6pm", "lunes por la tarde", etc.
+- **Horarios Configurables**: Lun-Vie: 7am, 12pm, 6pm, 8pm | Sáb: 9am, 11am
+- **Validaciones**: Capacidad máxima, no duplicados, horarios válidos
+- **Google Calendar**: Genera links para agregar citas al calendario personal
 
-- Python 3.11+
-- Docker Desktop
-- Git
+### 💼 Dashboard Administrativo
+- **Estadísticas en Tiempo Real**: Total leads, interesados, agendados, tasa de conversión
+- **Gestión de Leads**: Vista completa con historial de conversaciones
+- **Control de Citas**: Confirmar, cancelar, ver citas del día
+- **Auto-actualización**: Refresh automático cada 10 segundos
 
-### Instalación
+## 🚀 Instalación
 
-1. **Clonar el repositorio**
+### Requisitos Previos
+- Python 3.8 o superior
+- pip (gestor de paquetes de Python)
+- Cuenta de Twilio (para WhatsApp)
+- API Key de OpenAI (opcional pero recomendado)
+- ngrok (para desarrollo local)
+
+### Paso 1: Clonar el Repositorio
 ```bash
-git clone https://github.com/tu-usuario/bjj-academy-bot.git
+git clone [URL-de-tu-repositorio]
 cd bjj-academy-bot
 ```
 
-2. **Configurar ambiente virtual (Windows)**
-```powershell
+### Paso 2: Crear Entorno Virtual (Recomendado)
+```bash
 python -m venv venv
-.\venv\Scripts\activate
+
+# En Windows:
+venv\Scripts\activate
+
+# En Mac/Linux:
+source venv/bin/activate
 ```
 
-3. **Instalar dependencias**
-```powershell
-pip install -r backend\requirements.txt
-```
-
-4. **Configurar variables de entorno**
-```powershell
-copy backend\.env.example backend\.env
-# Editar backend\.env con tus API keys
-```
-
-5. **Levantar servicios con Docker**
-```powershell
-docker-compose up -d postgres redis
-```
-
-6. **Inicializar base de datos**
-```powershell
+### Paso 3: Instalar Dependencias
+```bash
 cd backend
-flask db init
-flask db migrate -m "Initial migration"
-flask db upgrade
+pip install -r requirements.txt
 ```
 
-7. **Ejecutar la aplicación**
-```powershell
-# Terminal 1 - Flask
-flask run
-
-# Terminal 2 - Celery Worker
-celery -A app.celery_app worker --loglevel=info
-
-# Terminal 3 - Celery Beat (opcional)
-celery -A app.celery_app beat --loglevel=info
+### Paso 4: Configurar Variables de Entorno
+```bash
+# Crear archivo .env basado en el ejemplo
+cp .env.example .env
 ```
 
-## 📊 Estructura del Proyecto
+Editar `.env` con tus credenciales:
+```env
+# OpenAI
+OPENAI_API_KEY=sk-tu-api-key-aqui
+
+# Twilio (para producción)
+TWILIO_ACCOUNT_SID=tu-account-sid
+TWILIO_AUTH_TOKEN=tu-auth-token
+TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
+
+# Flask
+FLASK_ENV=development
+SECRET_KEY=genera-una-clave-secreta-segura
+```
+
+### Paso 5: Iniciar el Servidor
+```bash
+python run.py
+```
+El servidor estará disponible en: `http://localhost:5000`
+
+### Paso 6: Configurar ngrok (para WhatsApp)
+En una terminal separada:
+```bash
+ngrok http 5000
+```
+Copia la URL HTTPS generada (ej: `https://abc123.ngrok.io`)
+
+## 📱 Configuración de WhatsApp/Twilio
+
+1. **Acceder a Twilio Console**
+   - Ir a: https://console.twilio.com
+   - Navegar a: Messaging → Try it out → WhatsApp
+
+2. **Configurar Sandbox**
+   - En "Sandbox Configuration"
+   - **WHEN A MESSAGE COMES IN**: `https://tu-url-ngrok.ngrok.io`
+   - **METHOD**: HTTP POST
+   - Guardar configuración
+
+3. **Conectar WhatsApp**
+   - Enviar código de activación al número de Twilio
+   - Generalmente: "join [palabra-código]"
+
+## 💻 Uso del Sistema
+
+### Para Usuarios (WhatsApp)
+1. Enviar mensaje al número de WhatsApp configurado
+2. Ejemplos de conversación:
+   - "Hola, quiero información"
+   - "¿Cuánto cuesta la mensualidad?"
+   - "Quiero agendar una clase de prueba"
+   - "Mañana a las 6pm"
+
+### Para Administradores (Dashboard)
+1. Acceder a: `http://localhost:5000/dashboard`
+2. **Sección Estadísticas**: Ver métricas generales y leads
+3. **Sección Citas**: Gestionar agendamientos
+4. Click en "Ver Chat" para revisar conversaciones completas
+
+## 🗂️ Estructura del Proyecto
 
 ```
 bjj-academy-bot/
 ├── backend/
 │   ├── app/
-│   │   ├── api/           # Endpoints y webhooks
-│   │   ├── models/        # Modelos de base de datos
-│   │   ├── services/      # Lógica de negocio
-│   │   └── utils/         # Utilidades
-│   ├── tests/             # Tests unitarios e integración
-│   ├── scripts/           # Scripts de utilidad
-│   └── docs/              # Documentación adicional
-├── docker-compose.yml     # Configuración Docker
-├── README.md             # Este archivo
-└── .gitignore           # Archivos ignorados por Git
+│   │   ├── __init__.py          # Configuración Flask
+│   │   ├── api/
+│   │   │   └── dashboard_routes.py  # Endpoints del dashboard
+│   │   ├── services/
+│   │   │   ├── message_handler.py   # Procesamiento de mensajes
+│   │   │   └── appointment_scheduler.py  # Lógica de agendamiento
+│   │   └── templates/
+│   │       └── dashboard.html    # Interface del dashboard
+│   ├── bjj_academy.db           # Base de datos SQLite
+│   ├── requirements.txt         # Dependencias Python
+│   ├── .env                     # Variables de entorno
+│   └── run.py                   # Script principal
+└── README.md                    # Este archivo
 ```
+
+## 📊 Base de Datos
+
+### Esquema Principal
+- **academy**: Información de la academia
+- **lead**: Datos de prospectos/clientes
+- **conversation**: Sesiones de chat
+- **message**: Mensajes individuales
+- **appointment**: Citas agendadas
+- **schedule_slots**: Horarios disponibles
 
 ## 🧪 Testing
 
-```powershell
-# Ejecutar todos los tests
-pytest
-
-# Con coverage
-pytest --cov=app --cov-report=html
-
-# Solo tests unitarios
-pytest -m unit
-
-# Solo tests de integración
-pytest -m integration
-```
-
-## 📝 API Documentation
-
-### Endpoints principales
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/webhooks/whatsapp` | Recibe mensajes de WhatsApp |
-| GET | `/api/v1/academies` | Lista academias |
-| GET | `/api/v1/leads` | Lista leads |
-| POST | `/api/v1/leads/{id}/schedule` | Agenda clase de prueba |
-| GET | `/health` | Health check |
-
-## 🔧 Configuración
-
-### Variables de Entorno Principales
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FLASK_ENV` | Environment (development/production) | development |
-| `DATABASE_URL` | PostgreSQL connection string | - |
-| `REDIS_URL` | Redis connection string | - |
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `TWILIO_ACCOUNT_SID` | Twilio account SID | - |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token | - |
-
-## 📊 Modelo de Datos
-
-### Academy (Multi-tenant)
-- Información de la academia
-- Configuración de integraciones
-- Personalización de IA
-
-### Lead
-- Información de contacto
-- Estado del lead
-- Historial de conversaciones
-
-### Conversation
-- Mensajes
-- Contexto
-- Métricas
-
-## 🚢 Deployment
-
-### Docker
-
-```powershell
-docker-compose up --build
-```
-
-### Heroku
-
+### Prueba Básica
 ```bash
-heroku create bjj-academy-bot
-heroku addons:create heroku-postgresql:hobby-dev
-heroku addons:create heroku-redis:hobby-dev
+# 1. Verificar servidor
+curl http://localhost:5000/health
+
+# 2. Verificar API
+curl http://localhost:5000/api/stats
+
+# 3. Simular mensaje WhatsApp
+curl -X POST http://localhost:5000/webhook/whatsapp \
+  -d "Body=Hola&From=whatsapp:+521234567890"
+```
+
+### Flujo de Prueba Completo
+1. Enviar "Hola" por WhatsApp
+2. Preguntar por precios
+3. Agendar una clase
+4. Verificar en dashboard
+5. Confirmar/cancelar cita
+
+## 🚀 Deployment
+
+### Opción 1: Heroku
+```bash
+# Crear Procfile
+echo "web: cd backend && python run.py" > Procfile
+
+# Subir a Heroku
+heroku create tu-app-name
 git push heroku main
 ```
 
-## 📈 Monitoring
+### Opción 2: Railway
+1. Conectar repositorio GitHub
+2. Configurar variables de entorno
+3. Deploy automático
 
-- **Logs**: Verificar en `logs/app.log`
-- **Celery**: Monitor en `http://localhost:5555` (Flower)
-- **Database**: pgAdmin en `http://localhost:5050`
+### Consideraciones de Producción
+- Cambiar SQLite por PostgreSQL
+- Configurar HTTPS/SSL
+- Usar servicio de mensajería dedicado
+- Implementar autenticación en dashboard
+- Configurar backups automáticos
 
-## 🤝 Contributing
+## 📈 Métricas del Proyecto
+
+- **Leads Capturados**: 8
+- **Conversaciones**: 8
+- **Mensajes Procesados**: 30+
+- **Citas Agendadas**: 3
+- **Tasa de Conversión**: ~37%
+
+## 🛠️ Tecnologías Utilizadas
+
+- **Backend**: Flask (Python 3.8+)
+- **Base de Datos**: SQLite (desarrollo), PostgreSQL (producción recomendado)
+- **IA**: OpenAI GPT-3.5 Turbo
+- **Mensajería**: Twilio WhatsApp Business API
+- **Frontend**: HTML5, Tailwind CSS, JavaScript Vanilla
+- **Herramientas**: ngrok, Git
+
+## 📝 Variables de Entorno
+
+| Variable | Descripción | Requerido |
+|----------|-------------|-----------|
+| `OPENAI_API_KEY` | API Key de OpenAI | Opcional* |
+| `TWILIO_ACCOUNT_SID` | ID de cuenta Twilio | Sí |
+| `TWILIO_AUTH_TOKEN` | Token de autenticación | Sí |
+| `TWILIO_WHATSAPP_NUMBER` | Número WhatsApp | Sí |
+| `FLASK_ENV` | Entorno (development/production) | No |
+| `SECRET_KEY` | Clave secreta Flask | Sí |
+
+*Si no se configura OpenAI, el bot usa respuestas predefinidas
+
+## 🤝 Contribuir
 
 1. Fork el proyecto
 2. Crear feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit cambios (`git commit -m 'Add AmazingFeature'`)
+3. Commit cambios (`git commit -m 'Add: AmazingFeature'`)
 4. Push al branch (`git push origin feature/AmazingFeature`)
 5. Abrir Pull Request
 
-## 📄 License
+## 📞 Soporte
 
-MIT License - ver LICENSE file para detalles
+Para soporte, problemas o sugerencias:
+- Crear un issue en GitHub
+- Contactar al desarrollador
 
-## 👥 Contacto
+## 🏆 Características Futuras
 
-Tu Nombre - [@tu_twitter](https://twitter.com/tu_twitter)
+- [ ] Integración con Google Calendar API
+- [ ] Sistema de pagos en línea
+- [ ] App móvil para instructores
+- [ ] Análisis predictivo de deserción
+- [ ] Multi-academia (SaaS)
+- [ ] Recordatorios automáticos
+- [ ] Integración con CRM
 
-Project Link: [https://github.com/tu-usuario/bjj-academy-bot](https://github.com/tu-usuario/bjj-academy-bot)
+## 📄 Licencia
 
-## 🙏 Acknowledgments
+Este proyecto está bajo la Licencia MIT - ver archivo [LICENSE](LICENSE) para detalles.
 
-- OpenAI por la API de GPT
-- Twilio por la integración de WhatsApp
-- La comunidad de BJJ por la inspiración
+## 👨‍💻 Autor
+
+**Tu Nombre**
+- GitHub: [@tu-usuario](https://github.com/tu-usuario)
+- LinkedIn: [tu-perfil](https://linkedin.com/in/tu-perfil)
+
+## 🙏 Agradecimientos
+
+- OpenAI por GPT-3.5
+- Twilio por la API de WhatsApp
+- Comunidad de Flask
+- Academia BJJ por la oportunidad
+
+---
+
+**Desarrollado con ❤️ para BJJ Academy | Septiembre 2024**
