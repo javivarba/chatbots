@@ -1,0 +1,258 @@
+═══════════════════════════════════════════════════════════════════════════
+    CONFIGURACIÓN REDIS CLOUD - PASO A PASO PARA BJJ MINGO
+═══════════════════════════════════════════════════════════════════════════
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  PASO 1: OBTENER CREDENCIALES DE REDIS CLOUD                         ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+1. Ir a tu Redis Cloud:
+   https://cloud.redis.io/#/databases/13737802/subscription/2994291/view-bdb/configuration
+
+2. En la pestaña "Configuration", copiar:
+
+   Public Endpoint:
+   ┌─────────────────────────────────────────────────────────┐
+   │ redis-XXXXX.c123.us-east-1-1.ec2.cloud.redislabs.com:12345 │
+   └─────────────────────────────────────────────────────────┘
+           ↑                                              ↑
+         HOST                                           PORT
+
+   Default user password: [Click "Show" para ver]
+   ┌─────────────────────────────────────────────────────────┐
+   │ tu_password_secreto_aqui                                │
+   └─────────────────────────────────────────────────────────┘
+
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  PASO 2: CONFIGURAR EL ARCHIVO .env                                  ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+1. Abrir: backend/.env
+
+2. Buscar la sección:
+   # Redis Cloud Configuration
+
+3. REEMPLAZAR estos valores con los tuyos:
+
+   REDIS_HOST=redis-XXXXX.c123.us-east-1-1.ec2.cloud.redislabs.com
+   REDIS_PORT=12345
+   REDIS_PASSWORD=tu_password_real_aqui
+   REDIS_USERNAME=default
+
+4. ACTUALIZAR las URLs de Celery:
+
+   CELERY_BROKER_URL=redis://default:tu_password@redis-XXXXX...:12345/0
+   CELERY_RESULT_BACKEND=redis://default:tu_password@redis-XXXXX...:12345/1
+
+   IMPORTANTE: Reemplazar TODO:
+   - default → tu username (usualmente "default")
+   - tu_password → tu password real
+   - redis-XXXXX... → tu endpoint completo
+   - 12345 → tu puerto real
+
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  PASO 3: VERIFICAR LA CONEXIÓN                                       ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+Opción A - Script Automático (Recomendado):
+────────────────────────────────────────────
+
+   cd backend
+   python test_redis_connection.py
+
+   ✅ Si sale:
+      ✅ CONEXIÓN EXITOSA!
+      ✅ Redis Cloud está configurado correctamente!
+
+   ❌ Si sale error:
+      - Verifica que copiaste bien el endpoint
+      - Verifica que el password es correcto
+      - Lee el mensaje de error, te dice qué revisar
+
+
+Opción B - Python Manual:
+──────────────────────────
+
+   cd backend
+   python
+
+   >>> import redis, os
+   >>> from dotenv import load_dotenv
+   >>> load_dotenv()
+   >>> r = redis.from_url(os.getenv('CELERY_BROKER_URL'))
+   >>> r.ping()
+   True    ← Esto significa que funciona!
+
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  PASO 4: EJECUTAR EL SISTEMA                                         ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+¡Ya NO necesitas Docker ni Redis local!
+Tu Redis Cloud ya está corriendo 24/7.
+
+Solo ejecuta:
+
+Opción A - TODO EN UNO (Rápido):
+─────────────────────────────────
+
+   cd backend
+   run_all_dev.bat
+
+
+Opción B - 3 Terminales (Producción):
+──────────────────────────────────────
+
+   Terminal 1:
+   cd backend
+   python run.py
+
+   Terminal 2:
+   cd backend
+   start_celery_worker.bat
+
+   Terminal 3:
+   cd backend
+   start_celery_beat.bat
+
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  PASO 5: VERIFICAR QUE TODO FUNCIONA                                 ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+Test completo del sistema:
+
+   cd backend
+   python test_reminders_system.py
+
+Deberías ver:
+
+   [OK] PASS - Database
+   [OK] PASS - ReminderService
+   [OK] PASS - NotificationService
+   [OK] PASS - Redis                  ← Este es el importante!
+   [OK] PASS - Celery Tasks
+
+   Total: 5/5 tests pasaron
+
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  MONITOREO EN REDIS INSIGHT                                          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+1. Abrir Redis Insight (web o app)
+   https://cloud.redis.io/
+
+2. Conectar a tu database
+
+3. Ver en tiempo real:
+
+   Browser Tab:
+   ┌─────────────────────────────────────────────────────┐
+   │ celery-task-meta-abc123...  → Resultados de tareas │
+   │ _kombu.binding.celery       → Colas de Celery      │
+   │ bjj_mingo_*                 → Datos del sistema    │
+   └─────────────────────────────────────────────────────┘
+
+   CLI Tab:
+   > KEYS celery*
+   > DBSIZE         (ver cuántas keys hay)
+   > INFO           (info del servidor)
+
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  ERRORES COMUNES Y SOLUCIONES                                        ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+Error: "Connection refused" o "Timeout"
+───────────────────────────────────────
+
+   Causa: IP bloqueada en firewall
+
+   Solución:
+   1. Ve a Redis Cloud → Database → Security → Source IP/Subnet
+   2. Click "Edit"
+   3. Agrega: 0.0.0.0/0 (permite todas las IPs - solo desarrollo)
+   4. Click "Save"
+
+
+Error: "WRONGPASS invalid username-password pair"
+─────────────────────────────────────────────────
+
+   Causa: Password incorrecto
+
+   Solución:
+   1. Ve a Redis Cloud → Database → Configuration
+   2. Click "Show" en "Default user password"
+   3. Copia el password EXACTO (sin espacios)
+   4. Pega en .env en REDIS_PASSWORD y en las URLs
+
+
+Error: "Authentication failed"
+──────────────────────────────
+
+   Causa: Username incorrecto
+
+   Solución:
+   Prueba estas opciones en .env:
+
+   Opción 1 (con username):
+   CELERY_BROKER_URL=redis://default:password@host:port/0
+
+   Opción 2 (sin username):
+   CELERY_BROKER_URL=redis://:password@host:port/0
+                           ↑ nota los dos puntos
+
+
+Error: Variables ${REDIS_HOST} no se expanden
+──────────────────────────────────────────────
+
+   Causa: Python dotenv no expande variables
+
+   Solución:
+   No usar ${VAR}, escribir directamente:
+
+   CELERY_BROKER_URL=redis://default:mipassword@redis-123.cloud.redislabs.com:12345/0
+
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  EJEMPLO COMPLETO DE .env                                            ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+# Redis Cloud Configuration
+REDIS_HOST=redis-12345.c123.us-east-1-1.ec2.cloud.redislabs.com
+REDIS_PORT=19123
+REDIS_PASSWORD=MiPasswordSuperSecreto123
+REDIS_USERNAME=default
+
+# Celery URLs (escribir directamente, no usar ${variables})
+CELERY_BROKER_URL=redis://default:MiPasswordSuperSecreto123@redis-12345.c123.us-east-1-1.ec2.cloud.redislabs.com:19123/0
+CELERY_RESULT_BACKEND=redis://default:MiPasswordSuperSecreto123@redis-12345.c123.us-east-1-1.ec2.cloud.redislabs.com:19123/1
+
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  CHECKLIST FINAL                                                     ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+□ Copié el endpoint de Redis Cloud
+□ Copié el password (sin espacios)
+□ Actualicé .env con mis credenciales REALES
+□ Probé conexión con: python test_redis_connection.py
+□ Vi: ✅ CONEXIÓN EXITOSA!
+□ Ejecuté: python test_reminders_system.py
+□ Vi: [OK] PASS - Redis
+□ Ejecuté: run_all_dev.bat
+□ Sistema funcionando!
+
+
+═══════════════════════════════════════════════════════════════════════════
+
+PARA MÁS AYUDA:
+
+  Guía completa: REDIS_CLOUD_SETUP.md
+  Test de conexión: python test_redis_connection.py
+  Test del sistema: python test_reminders_system.py
+
+═══════════════════════════════════════════════════════════════════════════

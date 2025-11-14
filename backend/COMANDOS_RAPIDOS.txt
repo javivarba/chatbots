@@ -1,0 +1,101 @@
+═══════════════════════════════════════════════════════════
+    SISTEMA DE RECORDATORIOS BJJ MINGO - COMANDOS RAPIDOS
+═══════════════════════════════════════════════════════════
+
+╔═══════════════════════════════════════════════════════════╗
+║  OPCION 1: MODO AUTOMATICO (Recomendado)                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+1. Iniciar Redis:
+   docker run -d --name redis-bjj -p 6379:6379 redis
+
+2. Ejecutar TODO en una ventana:
+   Windows:  cd backend && run_all_dev.bat
+   Linux/Mac: cd backend && ./run_all_dev.sh
+
+¡Listo! El sistema completo está corriendo.
+
+
+╔═══════════════════════════════════════════════════════════╗
+║  OPCION 2: MODO MANUAL (3 Terminales Separadas)          ║
+╚═══════════════════════════════════════════════════════════╝
+
+1. Iniciar Redis:
+   docker run -d --name redis-bjj -p 6379:6379 redis
+
+2. TERMINAL 1 - Flask App:
+   cd backend
+   python run.py
+
+3. TERMINAL 2 - Celery Worker:
+   Windows:  cd backend && start_celery_worker.bat
+   Linux/Mac: cd backend && ./start_celery_worker.sh
+
+4. TERMINAL 3 - Celery Beat:
+   Windows:  cd backend && start_celery_beat.bat
+   Linux/Mac: cd backend && ./start_celery_beat.sh
+
+
+╔═══════════════════════════════════════════════════════════╗
+║  VERIFICAR QUE TODO FUNCIONA                              ║
+╚═══════════════════════════════════════════════════════════╝
+
+Ejecutar tests:
+   cd backend
+   python test_reminders_system.py
+
+Debe mostrar:
+   [OK] PASS - Database
+   [OK] PASS - ReminderService
+   [OK] PASS - Redis
+   [OK] PASS - Celery Tasks
+
+
+╔═══════════════════════════════════════════════════════════╗
+║  COMANDOS UTILES                                          ║
+╚═══════════════════════════════════════════════════════════╝
+
+Ver recordatorios pendientes:
+   python -c "from app.services.reminder_service import ReminderService; print(f'Pendientes: {ReminderService().get_pending_reminders_count()}')"
+
+Ver tareas activas de Celery:
+   celery -A app.celery_app inspect active
+
+Ver estado de Redis:
+   redis-cli ping
+
+Detener Redis:
+   docker stop redis-bjj
+
+
+╔═══════════════════════════════════════════════════════════╗
+║  SOLUCIONES RAPIDAS                                       ║
+╚═══════════════════════════════════════════════════════════╝
+
+Error: "Redis connection refused"
+→ Iniciar Redis: docker run -d --name redis-bjj -p 6379:6379 redis
+
+Error: "No module named 'celery'"
+→ Instalar: pip install -r requirements.txt
+
+Recordatorios no se envían:
+→ Verificar logs en Terminal 2 y 3
+→ Verificar: python test_reminders_system.py
+
+
+╔═══════════════════════════════════════════════════════════╗
+║  ARQUITECTURA DEL SISTEMA                                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+Cliente → WhatsApp → Flask App → BD (recordatorios)
+                                   ↓
+                        Celery Beat (cada hora)
+                                   ↓
+                              Redis (queue)
+                                   ↓
+                        Celery Worker (envía)
+                                   ↓
+                        Cliente ← WhatsApp
+
+
+═══════════════════════════════════════════════════════════
