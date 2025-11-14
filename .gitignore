@@ -46,6 +46,8 @@ htmlcov/
 
 # Old scripts
 _old_scripts/
+old_files/
+backend/old_files/
 
 # Ngrok
 ngrok.exe

@@ -3,11 +3,11 @@ Message Handler UNIFICADO con prioridad ABSOLUTA a OpenAI
 Actualizado para BJJ Mingo con voseo costarricense
 """
 
-import sqlite3
 import os
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
+from app.utils.database import get_db_connection, get_db_cursor
 
 # Cargar variables de entorno
 load_dotenv(override=True)
@@ -104,7 +104,7 @@ class MessageHandler:
         response = self._generate_ai_response(message, lead_id, conv_id)
         
         # 5. Guardar respuesta del bot
-        self._save_message(conv_id, 'bot', response)
+        self._save_message(conv_id, 'assistant', response)
         
         # 6. Actualizar lead
         self._update_lead_status(lead_id, message)
@@ -300,133 +300,116 @@ INSTRUCCIONES:
     
     def _get_or_create_lead(self, phone_number, name=None):
         """Obtener o crear lead"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT id, name FROM lead WHERE phone_number = ?", (phone_number,))
-        lead = cursor.fetchone()
-        
-        if not lead:
-            cursor.execute("""
-                INSERT INTO lead (academy_id, phone_number, name, source, status, interest_level)
-                VALUES (1, ?, ?, 'whatsapp', 'new', 5)
-            """, (phone_number, name or 'WhatsApp User'))
-            conn.commit()
-            lead_id = cursor.lastrowid
-        else:
-            lead_id = lead[0]
-        
-        conn.close()
+        with get_db_cursor(db_path=self.db_path) as cursor:
+            cursor.execute("SELECT id, name FROM lead WHERE phone_number = ?", (phone_number,))
+            lead = cursor.fetchone()
+
+            if not lead:
+                cursor.execute("""
+                    INSERT INTO lead (academy_id, phone_number, name, source, status, interest_level)
+                    VALUES (1, ?, ?, 'whatsapp', 'new', 5)
+                """, (phone_number, name or 'WhatsApp User'))
+                lead_id = cursor.lastrowid
+            else:
+                lead_id = lead[0]
+
         return lead_id
     
     def _get_or_create_conversation(self, lead_id):
         """Obtener o crear conversación"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id FROM conversation 
-            WHERE lead_id = ? AND status = 'active'
-        """, (lead_id,))
-        conv = cursor.fetchone()
-        
-        if not conv:
+        with get_db_cursor(db_path=self.db_path) as cursor:
             cursor.execute("""
-                INSERT INTO conversation (lead_id, academy_id, status)
-                VALUES (?, 1, 'active')
+                SELECT id FROM conversation
+                WHERE lead_id = ? AND status = 'active'
             """, (lead_id,))
-            conn.commit()
-            conv_id = cursor.lastrowid
-        else:
-            conv_id = conv[0]
-        
-        conn.close()
+            conv = cursor.fetchone()
+
+            if not conv:
+                cursor.execute("""
+                    INSERT INTO conversation (lead_id, academy_id, status)
+                    VALUES (?, 1, 'active')
+                """, (lead_id,))
+                conv_id = cursor.lastrowid
+            else:
+                conv_id = conv[0]
+
         return conv_id
     
     def _save_message(self, conv_id, sender, content, intent=None):
         """Guardar mensaje"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO message (conversation_id, sender, content, intent_detected)
-            VALUES (?, ?, ?, ?)
-        """, (conv_id, sender, content, intent))
-        
-        conn.commit()
-        conn.close()
+        with get_db_cursor(db_path=self.db_path) as cursor:
+            cursor.execute("""
+                INSERT INTO message (conversation_id, sender, content, intent_detected)
+                VALUES (?, ?, ?, ?)
+            """, (conv_id, sender, content, intent))
     
     def _get_lead_info(self, lead_id):
         """Obtener información del lead"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id, phone_number, name, status, interest_level, source
-            FROM lead WHERE id = ?
-        """, (lead_id,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return {
-                'id': row[0],
-                'phone': row[1],
-                'name': row[2],
-                'status': row[3],
-                'interest_level': row[4],
-                'source': row[5]
-            }
+        with get_db_connection(db_path=self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT id, phone_number, name, status, interest_level, source
+                FROM lead WHERE id = ?
+            """, (lead_id,))
+
+            row = cursor.fetchone()
+
+            if row:
+                return {
+                    'id': row[0],
+                    'phone': row[1],
+                    'name': row[2],
+                    'status': row[3],
+                    'interest_level': row[4],
+                    'source': row[5]
+                }
         return {}
     
     def _get_academy_info(self):
         """Obtener información de la academia"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT name, description, instructor_name, instructor_belt, 
-                   phone, address_street, address_city
-            FROM academy WHERE id = 1
-        """)
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return {
-                'name': row[0],
-                'description': row[1],
-                'instructor': f"{row[2]} ({row[3]})" if row[2] else 'Instructores certificados',
-                'phone': row[4],
-                'location': f"{row[5]}, {row[6]}" if row[5] and row[6] else 'Santo Domingo de Heredia, Costa Rica'
-            }
+        with get_db_connection(db_path=self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT name, description, instructor_name, instructor_belt,
+                       phone, address_street, address_city
+                FROM academy WHERE id = 1
+            """)
+
+            row = cursor.fetchone()
+
+            if row:
+                return {
+                    'name': row[0],
+                    'description': row[1],
+                    'instructor': f"{row[2]} ({row[3]})" if row[2] else 'Instructores certificados',
+                    'phone': row[4],
+                    'location': f"{row[5]}, {row[6]}" if row[5] and row[6] else 'Santo Domingo de Heredia, Costa Rica'
+                }
         return {'name': 'BJJ Mingo', 'phone': '+506-8888-8888'}
     
     def _get_conversation_history(self, conv_id, limit=5):
         """Obtener historial de conversación"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT sender, content, timestamp
-            FROM message
-            WHERE conversation_id = ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-        """, (conv_id, limit))
-        
-        messages = []
-        for row in cursor.fetchall():
-            messages.append({
-                'sender': row[0],
-                'content': row[1],
-                'timestamp': row[2]
-            })
-        
-        conn.close()
-        
+        with get_db_connection(db_path=self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT sender, content, timestamp
+                FROM message
+                WHERE conversation_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            """, (conv_id, limit))
+
+            messages = []
+            for row in cursor.fetchall():
+                messages.append({
+                    'sender': row[0],
+                    'content': row[1],
+                    'timestamp': row[2]
+                })
+
         # Invertir para orden cronológico
         messages.reverse()
         return messages
@@ -434,24 +417,19 @@ INSTRUCCIONES:
     def _update_lead_status(self, lead_id, message):
         """Actualizar estado del lead"""
         msg_lower = message.lower()
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Si muestra interés en clase
-        if any(word in msg_lower for word in ['agendar', 'clase', 'prueba', 'probar', 'semana']):
-            cursor.execute("""
-                UPDATE lead 
-                SET status = 'interested', interest_level = 8
-                WHERE id = ? AND status != 'scheduled'
-            """, (lead_id,))
-        # Si es primera interacción
-        else:
-            cursor.execute("""
-                UPDATE lead 
-                SET status = 'contacted'
-                WHERE id = ? AND status = 'new'
-            """, (lead_id,))
-        
-        conn.commit()
-        conn.close()
+
+        with get_db_cursor(db_path=self.db_path) as cursor:
+            # Si muestra interés en clase
+            if any(word in msg_lower for word in ['agendar', 'clase', 'prueba', 'probar', 'semana']):
+                cursor.execute("""
+                    UPDATE lead
+                    SET status = 'interested', interest_level = 8
+                    WHERE id = ? AND status != 'scheduled'
+                """, (lead_id,))
+            # Si es primera interacción
+            else:
+                cursor.execute("""
+                    UPDATE lead
+                    SET status = 'contacted'
+                    WHERE id = ? AND status = 'new'
+                """, (lead_id,))

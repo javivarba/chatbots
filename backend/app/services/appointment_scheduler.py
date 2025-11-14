@@ -4,10 +4,10 @@ Versión actualizada con horarios reales y sistema de semana de prueba
 Incluye notificaciones automáticas al staff
 """
 
-import sqlite3
 from datetime import datetime, timedelta
 import re
 import logging
+from app.utils.database import get_db_connection, get_db_cursor
 
 logger = logging.getLogger(__name__)
 
@@ -173,85 +173,82 @@ class AppointmentScheduler:
     def book_trial_week(self, lead_id, clase_tipo, notes=None):
         """
         Registra una semana de prueba para un prospecto
-        NUEVO: Envía notificación al staff en lugar de link de calendario al cliente
+        NUEVO: Envía notificación al staff + Programa recordatorios automáticos 24hrs antes
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        # Verificar si ya tiene una semana de prueba activa
-        cursor.execute("""
-            SELECT COUNT(*) FROM trial_weeks
-            WHERE lead_id = ? AND status = 'active'
-        """, (lead_id,))
-
-        if cursor.fetchone()[0] > 0:
-            conn.close()
-            return {
-                'success': False,
-                'message': 'Ya tenés una semana de prueba activa.'
-            }
-
-        start_date = datetime.now()
-        end_date = start_date + timedelta(days=7)
-
-        try:
-            # Registrar la semana de prueba
+        with get_db_cursor(db_path=self.db_path) as cursor:
+            # Verificar si ya tiene una semana de prueba activa
             cursor.execute("""
-                INSERT INTO trial_weeks
-                (lead_id, clase_tipo, start_date, end_date, status, notes)
-                VALUES (?, ?, ?, ?, 'active', ?)
-            """, (lead_id, clase_tipo, start_date.strftime('%Y-%m-%d'),
-                  end_date.strftime('%Y-%m-%d'), notes))
-
-            trial_id = cursor.lastrowid
-
-            # Actualizar status del lead
-            cursor.execute("""
-                UPDATE leads
-                SET status = 'trial_scheduled', lead_score = 9
-                WHERE id = ?
+                SELECT COUNT(*) FROM trial_weeks
+                WHERE lead_id = ? AND status = 'active'
             """, (lead_id,))
 
-            conn.commit()
-
-            # Obtener información del lead para la notificación
-            cursor.execute("""
-                SELECT phone, name FROM leads WHERE id = ?
-            """, (lead_id,))
-            lead_data = cursor.fetchone()
-            conn.close()
-
-            # Preparar información para notificación
-            horario = self.horarios[clase_tipo]
-            dias_texto = self._get_dias_texto(horario['dias'])
-            next_class_date = self._get_next_class_date(clase_tipo)
-
-            # NUEVO: Enviar notificación al staff de la academia
-            if self.notifier:
-                lead_info = {
-                    'name': lead_data[1] if lead_data else 'No proporcionado',
-                    'phone': lead_data[0] if lead_data else 'No proporcionado',
-                    'status': 'trial_scheduled'
+            if cursor.fetchone()[0] > 0:
+                return {
+                    'success': False,
+                    'message': 'Ya tenés una semana de prueba activa.'
                 }
 
-                trial_info = {
-                    'clase_nombre': horario['nombre'],
-                    'start_date': start_date.strftime('%Y-%m-%d'),
-                    'dias_texto': dias_texto,
-                    'hora': horario['hora'],
-                    'notes': notes or 'Agendado vía WhatsApp'
-                }
+            start_date = datetime.now()
+            end_date = start_date + timedelta(days=7)
 
-                # Enviar notificación
-                notification_result = self.notifier.notify_new_trial_booking(lead_info, trial_info)
+            try:
+                # Registrar la semana de prueba
+                cursor.execute("""
+                    INSERT INTO trial_weeks
+                    (lead_id, clase_tipo, start_date, end_date, status, notes)
+                    VALUES (?, ?, ?, ?, 'active', ?)
+                """, (lead_id, clase_tipo, start_date.strftime('%Y-%m-%d'),
+                      end_date.strftime('%Y-%m-%d'), notes))
 
-                if notification_result['success']:
-                    logger.info(f"✅ Notificación enviada al staff para lead {lead_id}")
-                else:
-                    logger.warning(f"⚠️ No se pudo enviar notificación: {notification_result['message']}")
+                trial_id = cursor.lastrowid
 
-            # Mensaje de confirmación para el cliente (SIN link de calendario)
-            confirmation = f"""✅ ¡SEMANA DE PRUEBA CONFIRMADA!
+                # Actualizar status del lead
+                cursor.execute("""
+                    UPDATE leads
+                    SET status = 'trial_scheduled', lead_score = 9
+                    WHERE id = ?
+                """, (lead_id,))
+
+                # Obtener información del lead para la notificación
+                cursor.execute("""
+                    SELECT phone, name FROM leads WHERE id = ?
+                """, (lead_id,))
+                lead_data = cursor.fetchone()
+
+                # Preparar información para notificación
+                horario = self.horarios[clase_tipo]
+                dias_texto = self._get_dias_texto(horario['dias'])
+                next_class_date = self._get_next_class_date(clase_tipo)
+
+                # NUEVO: Enviar notificación al staff de la academia
+                if self.notifier:
+                    lead_info = {
+                        'name': lead_data[1] if lead_data else 'No proporcionado',
+                        'phone': lead_data[0] if lead_data else 'No proporcionado',
+                        'status': 'trial_scheduled'
+                    }
+
+                    trial_info = {
+                        'clase_nombre': horario['nombre'],
+                        'start_date': start_date.strftime('%Y-%m-%d'),
+                        'dias_texto': dias_texto,
+                        'hora': horario['hora'],
+                        'notes': notes or 'Agendado vía WhatsApp'
+                    }
+
+                    # Enviar notificación
+                    notification_result = self.notifier.notify_new_trial_booking(lead_info, trial_info)
+
+                    if notification_result['success']:
+                        logger.info(f"✅ Notificación enviada al staff para lead {lead_id}")
+                    else:
+                        logger.warning(f"⚠️ No se pudo enviar notificación: {notification_result['message']}")
+
+                # NUEVO: Programar recordatorios automáticos 24 horas antes de cada clase
+                self._schedule_reminders(lead_id, trial_id, clase_tipo, start_date)
+
+                # Mensaje de confirmación para el cliente (SIN link de calendario)
+                confirmation = f"""✅ ¡SEMANA DE PRUEBA CONFIRMADA!
 
 📋 Detalles:
 - Clase: {horario['nombre']}
@@ -270,24 +267,24 @@ class AppointmentScheduler:
 - Si tenés gi, podés traerlo
 
 🎯 *La academia te contactará pronto para confirmar tu asistencia.*
+🔔 *Te enviaremos un recordatorio 24 horas antes de cada clase.*
 
 📞 Cualquier duda: {self._get_phone()}
 
 ¡Te esperamos! 🥋"""
 
-            return {
-                'success': True,
-                'message': confirmation,
-                'trial_id': trial_id
-            }
+                return {
+                    'success': True,
+                    'message': confirmation,
+                    'trial_id': trial_id
+                }
 
-        except Exception as e:
-            conn.close()
-            logger.error(f"Error registrando semana de prueba: {e}")
-            return {
-                'success': False,
-                'message': f'Error al registrar: {str(e)}'
-            }
+            except Exception as e:
+                logger.error(f"Error registrando semana de prueba: {e}")
+                return {
+                    'success': False,
+                    'message': f'Error al registrar: {str(e)}'
+                }
     
     def _get_dias_texto(self, dias_nums):
         """Convierte lista de números de días a texto"""
@@ -295,11 +292,10 @@ class AppointmentScheduler:
     
     def _get_phone(self):
         """Obtiene el teléfono de la academia"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT phone FROM academies WHERE id = 1")
-        result = cursor.fetchone()
-        conn.close()
+        with get_db_connection(db_path=self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT phone FROM academies WHERE id = 1")
+            result = cursor.fetchone()
         return result[0] if result else '+506-8888-8888'
     
     def format_available_slots_message(self, slots, clase_tipo=None):
@@ -330,8 +326,48 @@ class AppointmentScheduler:
         message += "\n💬 Respondé con el nombre de la clase y cuándo querés empezar.\n"
         message += "Ejemplo: 'Jiu-Jitsu adultos el martes'\n"
         message += "\n🎁 Recordá: ¡Tu primera SEMANA es GRATIS!"
-        
+
         return message
+
+    def _schedule_reminders(self, lead_id, trial_week_id, clase_tipo, start_date):
+        """
+        Programa recordatorios automáticos para cada clase de la semana
+        Usa Celery para programar tareas asíncronas (si está disponible)
+        """
+        try:
+            # Intentar usar Celery para programar recordatorios
+            try:
+                from app.tasks.reminder_tasks import schedule_trial_reminders
+
+                # Ejecutar tarea de forma asíncrona
+                result = schedule_trial_reminders.delay(
+                    lead_id=lead_id,
+                    trial_week_id=trial_week_id,
+                    clase_tipo=clase_tipo,
+                    start_date=start_date.strftime('%Y-%m-%d')
+                )
+
+                logger.info(f"✅ Tarea de recordatorios programada (Celery Task ID: {result.id})")
+
+            except ImportError:
+                # Si Celery no está disponible, programar directamente
+                logger.warning("⚠️ Celery no disponible, programando recordatorios directamente")
+                from app.services.reminder_service import ReminderService
+
+                reminder_service = ReminderService()
+                result = reminder_service.schedule_trial_week_reminders(
+                    lead_id=lead_id,
+                    trial_week_id=trial_week_id,
+                    clase_tipo=clase_tipo,
+                    start_date=start_date.strftime('%Y-%m-%d')
+                )
+
+                logger.info(f"Recordatorios programados directamente: {result}")
+
+        except Exception as e:
+            # No fallar el agendamiento si los recordatorios fallan
+            logger.error(f"⚠️ Error programando recordatorios (no crítico): {e}")
+
     def _get_next_class_date(self, clase_tipo):
         """Calcula la fecha de la próxima clase disponible"""
         horario = self.horarios[clase_tipo]

@@ -20,6 +20,7 @@ from app.services.message_processor import MessageProcessor
 from app.services.appointment_scheduler import AppointmentScheduler
 from app.services.notification_service import NotificationService
 from app.services.ai_service import AIService
+from app.services.reminder_service import ReminderService
 
 # Intentar importar academy_info
 try:
@@ -116,7 +117,7 @@ class CompleteFlowTest:
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in cursor.fetchall()]
         
-        required_tables = ['academies', 'leads', 'conversations', 'messages', 'appointments', 'trial_weeks']
+        required_tables = ['academies', 'leads', 'conversations', 'messages', 'appointments', 'trial_weeks', 'class_reminders']
         missing_tables = [t for t in required_tables if t not in tables]
         
         if missing_tables:
@@ -135,7 +136,7 @@ class CompleteFlowTest:
         cursor = conn.cursor()
         
         # Crear todas las tablas
-        self.create_missing_tables(conn, ['academies', 'leads', 'conversations', 'messages', 'appointments', 'trial_weeks'])
+        self.create_missing_tables(conn, ['academies', 'leads', 'conversations', 'messages', 'appointments', 'trial_weeks', 'class_reminders'])
         
         conn.commit()
         conn.close()
@@ -247,7 +248,29 @@ class CompleteFlowTest:
                 )
             """)
             print_info("Tabla 'trial_weeks' creada")
-        
+
+        if 'class_reminders' in tables:
+            cursor.execute("""
+                CREATE TABLE class_reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lead_id INTEGER NOT NULL,
+                    appointment_id INTEGER,
+                    trial_week_id INTEGER,
+                    clase_tipo TEXT NOT NULL,
+                    class_datetime TEXT NOT NULL,
+                    reminder_sent_at TEXT,
+                    reminder_status TEXT DEFAULT 'pending',
+                    error_message TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (lead_id) REFERENCES leads(id),
+                    FOREIGN KEY (appointment_id) REFERENCES appointments(id),
+                    FOREIGN KEY (trial_week_id) REFERENCES trial_weeks(id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_class_datetime ON class_reminders(class_datetime, reminder_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lead_reminders ON class_reminders(lead_id)")
+            print_info("Tabla 'class_reminders' creada")
+
         conn.commit()
         
     def setup_test_data(self):
@@ -483,30 +506,188 @@ class CompleteFlowTest:
     def test_notification_service(self):
         """Prueba el servicio de notificaciones directamente"""
         print_header("5. PROBANDO SERVICIO DE NOTIFICACIONES")
-        
+
         try:
             notifier = NotificationService()
-            
+
             print_info("Enviando notificación de prueba...")
             result = notifier.test_notification()
-            
+
             if result['success']:
                 print_success(f"Notificación enviada: {result['message']}")
                 if 'sid' in result:
                     print_info(f"Twilio SID: {result['sid']}")
             else:
                 print_warning(f"Notificación no enviada: {result['message']}")
-            
+
             return result['success']
-            
+
         except Exception as e:
             print_error(f"Error en notificación: {e}")
+            return False
+
+    def test_reminder_service(self, lead_id):
+        """Prueba el servicio de recordatorios automáticos"""
+        print_header("6. PROBANDO SISTEMA DE RECORDATORIOS AUTOMÁTICOS")
+
+        try:
+            reminder_service = ReminderService()
+
+            # Test 1: Verificar inicialización
+            print_info("\nTest 1: Verificando inicialización de ReminderService...")
+            if reminder_service.horarios:
+                print_success(f"ReminderService inicializado con {len(reminder_service.horarios)} tipos de clase")
+            else:
+                print_error("ReminderService no tiene horarios configurados")
+                return False
+
+            # Test 2: Verificar tabla de recordatorios existe
+            print_info("\nTest 2: Verificando tabla class_reminders...")
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='class_reminders'")
+            if cursor.fetchone():
+                print_success("Tabla 'class_reminders' existe")
+            else:
+                print_error("Tabla 'class_reminders' no existe")
+                conn.close()
+                return False
+
+            # Test 3: Obtener trial_week creado en test anterior
+            print_info("\nTest 3: Buscando trial_week para crear recordatorios...")
+            cursor.execute("""
+                SELECT id, clase_tipo, start_date
+                FROM trial_weeks
+                WHERE lead_id = ? AND status = 'active'
+                ORDER BY id DESC LIMIT 1
+            """, (lead_id,))
+            trial = cursor.fetchone()
+
+            if not trial:
+                print_warning("No se encontró trial_week activa. Creando una...")
+                # Crear trial_week temporal para testing
+                from datetime import datetime, timedelta
+                start_date = datetime.now()
+                end_date = start_date + timedelta(days=7)
+
+                cursor.execute("""
+                    INSERT INTO trial_weeks (lead_id, clase_tipo, start_date, end_date, status, notes)
+                    VALUES (?, 'adultos_jiujitsu', ?, ?, 'active', 'Test de recordatorios')
+                """, (lead_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
+                conn.commit()
+                trial_id = cursor.lastrowid
+                clase_tipo = 'adultos_jiujitsu'
+                start_date_str = start_date.strftime('%Y-%m-%d')
+                print_success(f"Trial_week creada - ID: {trial_id}")
+            else:
+                trial_id, clase_tipo, start_date_str = trial
+                print_success(f"Trial_week encontrada - ID: {trial_id}, Clase: {clase_tipo}")
+
+            conn.close()
+
+            # Test 4: Programar recordatorios para la semana de prueba
+            print_info("\nTest 4: Programando recordatorios para semana de prueba...")
+            result = reminder_service.schedule_trial_week_reminders(
+                lead_id=lead_id,
+                trial_week_id=trial_id,
+                clase_tipo=clase_tipo,
+                start_date=start_date_str
+            )
+
+            if result['success']:
+                print_success(f"Recordatorios programados: {result['message']}")
+                for reminder in result.get('reminders', []):
+                    print_info(f"  - {reminder['day']} {reminder['date']} a las {reminder['time']}")
+            else:
+                print_error(f"Error programando recordatorios: {result['message']}")
+                return False
+
+            # Test 5: Verificar recordatorios en BD
+            print_info("\nTest 5: Verificando recordatorios en base de datos...")
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM class_reminders
+                WHERE lead_id = ? AND trial_week_id = ? AND reminder_status = 'pending'
+            """, (lead_id, trial_id))
+            reminder_count = cursor.fetchone()[0]
+
+            if reminder_count > 0:
+                print_success(f"Encontrados {reminder_count} recordatorios pendientes en BD")
+
+                # Mostrar detalles
+                cursor.execute("""
+                    SELECT id, clase_tipo, class_datetime, reminder_status
+                    FROM class_reminders
+                    WHERE lead_id = ? AND trial_week_id = ?
+                    ORDER BY class_datetime
+                """, (lead_id, trial_id))
+
+                reminders = cursor.fetchall()
+                for reminder_id, clase, datetime_str, status in reminders:
+                    print_info(f"  Recordatorio #{reminder_id}: {clase} - {datetime_str} ({status})")
+            else:
+                print_warning("No se encontraron recordatorios en BD")
+
+            # Test 6: Simular envío de recordatorio (sin esperar 24 horas)
+            print_info("\nTest 6: Simulando envío de recordatorio...")
+            from datetime import datetime, timedelta
+
+            # Crear un recordatorio para "mañana" y enviarlo inmediatamente
+            tomorrow = datetime.now() + timedelta(days=1)
+            tomorrow_6pm = tomorrow.replace(hour=18, minute=0, second=0)
+
+            test_reminder_id = reminder_service._create_reminder(
+                lead_id=lead_id,
+                trial_week_id=trial_id,
+                clase_tipo=clase_tipo,
+                class_datetime=tomorrow_6pm
+            )
+
+            if test_reminder_id:
+                print_success(f"Recordatorio de prueba creado - ID: {test_reminder_id}")
+
+                # Obtener info del lead
+                cursor.execute("SELECT name, phone FROM leads WHERE id = ?", (lead_id,))
+                lead_data = cursor.fetchone()
+
+                if lead_data:
+                    lead_name, phone = lead_data
+
+                    print_info("Enviando recordatorio de prueba...")
+                    send_result = reminder_service._send_reminder(
+                        reminder_id=test_reminder_id,
+                        lead_name=lead_name,
+                        phone=phone,
+                        clase_tipo=clase_tipo,
+                        class_datetime_str=tomorrow_6pm.strftime('%Y-%m-%d %H:%M:%S')
+                    )
+
+                    if send_result['success']:
+                        print_success("Recordatorio enviado exitosamente!")
+                    else:
+                        print_warning(f"Recordatorio no enviado: {send_result['message']}")
+                        print_info("(Esto es normal si Twilio no está configurado)")
+
+            conn.close()
+
+            # Test 7: Verificar contador de recordatorios pendientes
+            print_info("\nTest 7: Verificando contador de recordatorios pendientes...")
+            pending_count = reminder_service.get_pending_reminders_count()
+            print_success(f"Recordatorios pendientes actualmente: {pending_count}")
+
+            return True
+
+        except Exception as e:
+            print_error(f"Error en test de recordatorios: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def cleanup(self):
         """Limpia los datos de prueba"""
-        print_header("6. LIMPIANDO DATOS DE PRUEBA")
-        
+        print_header("7. LIMPIANDO DATOS DE PRUEBA")
+
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -520,16 +701,17 @@ class CompleteFlowTest:
 
                 # Limpiar en orden por foreign keys
                 cursor.execute("DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE lead_id = ?)", (lead_id,))
+                cursor.execute("DELETE FROM class_reminders WHERE lead_id = ?", (lead_id,))
                 cursor.execute("DELETE FROM appointments WHERE lead_id = ?", (lead_id,))
                 cursor.execute("DELETE FROM trial_weeks WHERE lead_id = ?", (lead_id,))
                 cursor.execute("DELETE FROM conversations WHERE lead_id = ?", (lead_id,))
                 cursor.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
-                
+
                 conn.commit()
                 print_success("Datos de prueba limpiados")
-            
+
             conn.close()
-            
+
         except Exception as e:
             print_error(f"Error limpiando: {e}")
     
@@ -537,64 +719,74 @@ class CompleteFlowTest:
         """Ejecuta todas las pruebas"""
         print_header("INICIANDO TEST COMPLETO DEL FLUJO")
         print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
+
         results = {
             'database': False,
             'setup': False,
             'config': False,
             'messages': False,
             'booking': False,
-            'notification': False
+            'notification': False,
+            'reminders': False
         }
-        
+
         try:
             # 0. Verificar base de datos
             results['database'] = self.check_database()
-            
+
             # 1. Setup
             lead_id, conv_id = self.setup_test_data()
             results['setup'] = lead_id is not None
-            
+
             if not results['setup']:
                 print_error("Setup falló, abortando test")
                 return results
-            
+
             # 2. Verificar configuración
             config_results = self.test_configuration()
             results['config'] = any(config_results.values())
-            
+
             # 3. Probar procesamiento de mensajes
             results['messages'] = self.test_message_processing(lead_id, conv_id)
-            
+
             # 4. Probar agendamiento
             results['booking'] = self.test_appointment_booking(lead_id)
-            
+
             # 5. Probar notificaciones
             results['notification'] = self.test_notification_service()
-            
+
+            # 6. Probar recordatorios automáticos (NUEVO)
+            results['reminders'] = self.test_reminder_service(lead_id)
+
         finally:
-            # 6. Limpiar
+            # 7. Limpiar
             self.cleanup()
-        
+
         # Resumen final
         print_header("RESUMEN DE RESULTADOS")
-        
+
         for test, passed in results.items():
             if passed:
-                print_success(f"{test.upper()}: PASÓ")
+                print_success(f"{test.upper()}: PASO")
             else:
-                print_error(f"{test.upper()}: FALLÓ")
-        
+                print_error(f"{test.upper()}: FALLO")
+
         total_passed = sum(results.values())
         total_tests = len(results)
-        
+
         print(f"\n{Colors.BOLD}Total: {total_passed}/{total_tests} pruebas pasaron{Colors.ENDC}")
-        
+
         if total_passed == total_tests:
             print_success("\nTODAS LAS PRUEBAS PASARON! El sistema esta funcionando correctamente.")
+            print_info("\nResumen de funcionalidades verificadas:")
+            print_info("  1. Base de datos configurada correctamente")
+            print_info("  2. Procesamiento de mensajes con OpenAI")
+            print_info("  3. Agendamiento de semana de prueba")
+            print_info("  4. Notificaciones al staff por WhatsApp")
+            print_info("  5. Recordatorios automaticos 24hrs antes de clase")
         else:
             print_warning(f"\n{total_tests - total_passed} pruebas fallaron. Revisa los logs arriba.")
-        
+
         return results
 
 def main():
