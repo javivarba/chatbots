@@ -1,13 +1,16 @@
 """
 Tareas de Celery para gestión de recordatorios
 Incluye tareas periódicas y bajo demanda
+MIGRADO A SQLALCHEMY + POSTGRESQL (SIMPLIFICADO)
+NOTA: Funcionalidad completa requiere modelo ClassReminder
 """
 
 import logging
 from datetime import datetime, timedelta
 from app.celery_app import celery_app
 from app.services.reminder_service import ReminderService
-from app.utils.database import get_db_connection, get_db_cursor
+from app import db
+from app.models import Lead
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +20,24 @@ def check_and_send_reminders():
     """
     Tarea periódica (cada hora) que verifica clases próximas
     y envía recordatorios 24 horas antes
+
+    NOTA: Versión simplificada - requiere modelo ClassReminder para funcionar completamente
     """
     logger.info("🔍 Ejecutando tarea: check_and_send_reminders")
+    logger.warning("⚠️ Funcionalidad simplificada - requiere modelo ClassReminder")
 
     try:
-        reminder_service = ReminderService()
-        result = reminder_service.check_and_send_reminders()
+        # Por ahora solo registra en logs
+        pending_reminders = []  # En versión completa: obtener de ClassReminder
 
-        logger.info(f"✅ Tarea completada: {result}")
-        return result
+        logger.info(f"📋 Recordatorios pendientes: {len(pending_reminders)}")
+
+        return {
+            'success': True,
+            'pending': len(pending_reminders),
+            'sent': 0,
+            'message': 'Funcionalidad simplificada - requiere modelo ClassReminder'
+        }
 
     except Exception as e:
         logger.error(f"❌ Error en tarea check_and_send_reminders: {e}")
@@ -37,28 +49,22 @@ def cleanup_old_reminders(days_to_keep=30):
     """
     Tarea de limpieza que elimina recordatorios antiguos
     Por defecto mantiene los últimos 30 días
+
+    NOTA: Versión simplificada - requiere modelo ClassReminder
     """
     logger.info(f"🧹 Ejecutando tarea: cleanup_old_reminders (mantener últimos {days_to_keep} días)")
+    logger.warning("⚠️ Funcionalidad simplificada - requiere modelo ClassReminder")
 
     try:
-        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+        # En versión completa: eliminar recordatorios viejos de ClassReminder
+        deleted_count = 0
 
-        with get_db_cursor(db_path='bjj_academy.db') as cursor:
-            # Eliminar recordatorios antiguos que ya fueron enviados o fallaron
-            cursor.execute("""
-                DELETE FROM class_reminders
-                WHERE class_datetime < ?
-                AND reminder_status IN ('sent', 'failed')
-            """, (cutoff_date.strftime('%Y-%m-%d %H:%M:%S'),))
-
-            deleted_count = cursor.rowcount
-
-        logger.info(f"✅ Limpieza completada: {deleted_count} recordatorios antiguos eliminados")
+        logger.info(f"✅ Limpieza completada: {deleted_count} recordatorios eliminados (simulado)")
 
         return {
             'success': True,
             'deleted_count': deleted_count,
-            'cutoff_date': cutoff_date.strftime('%Y-%m-%d')
+            'message': 'Funcionalidad simplificada - requiere modelo ClassReminder'
         }
 
     except Exception as e:
@@ -70,31 +76,42 @@ def cleanup_old_reminders(days_to_keep=30):
 def update_expired_trials():
     """
     Tarea que actualiza el estado de trial weeks que ya expiraron
-    Marca como 'expired' las que pasaron su end_date
+    Marca leads con trial_class_date en el pasado
+
+    MIGRADO A SQLALCHEMY
     """
     logger.info("📅 Ejecutando tarea: update_expired_trials")
 
     try:
-        today = datetime.now().strftime('%Y-%m-%d')
+        # Obtener leads con trial_class_date en el pasado que siguen como 'scheduled'
+        now = datetime.now()
 
-        with get_db_cursor(db_path='bjj_academy.db') as cursor:
-            # Actualizar trial weeks expiradas
-            cursor.execute("""
-                UPDATE trial_weeks
-                SET status = 'expired'
-                WHERE status = 'active'
-                AND end_date < ?
-            """, (today,))
+        # Necesitamos usar Flask app context para queries
+        from app import create_app
+        app = create_app()
 
-            updated_count = cursor.rowcount
+        with app.app_context():
+            expired_leads = Lead.query.filter(
+                Lead.status == 'scheduled',
+                Lead.trial_class_date < now
+            ).all()
 
-        logger.info(f"✅ Actualización completada: {updated_count} trial weeks marcadas como expiradas")
+            updated_count = 0
+            for lead in expired_leads:
+                # Cambiar status a 'contacted' (o crear nuevo status 'trial_expired')
+                lead.status = 'contacted'
+                updated_count += 1
 
-        return {
-            'success': True,
-            'updated_count': updated_count,
-            'date': today
-        }
+            if updated_count > 0:
+                db.session.commit()
+
+            logger.info(f"✅ Actualización completada: {updated_count} trial weeks marcadas como expiradas")
+
+            return {
+                'success': True,
+                'updated_count': updated_count,
+                'date': now.strftime('%Y-%m-%d')
+            }
 
     except Exception as e:
         logger.error(f"❌ Error en tarea update_expired_trials: {e}")
@@ -107,41 +124,39 @@ def send_immediate_reminder(lead_id, clase_tipo, class_datetime_str):
     Tarea bajo demanda para enviar un recordatorio inmediato
     Útil para recordatorios manuales o re-envíos
 
+    MIGRADO A SQLALCHEMY
+
     Args:
         lead_id: ID del prospecto
         clase_tipo: Tipo de clase
-        class_datetime_str: Fecha/hora de la clase en formato 'YYYY-MM-DD HH:MM:SS'
+        class_datetime_str: Fecha/hora de la clase en formato 'YYYY-MM-DD HH:%M:%S'
     """
     logger.info(f"📨 Ejecutando tarea: send_immediate_reminder para lead {lead_id}")
 
     try:
-        reminder_service = ReminderService()
+        from app import create_app
+        app = create_app()
 
-        # Obtener información del lead
-        with get_db_connection(db_path='bjj_academy.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT name, phone_number FROM lead WHERE id = ?
-            """, (lead_id,))
-            lead_data = cursor.fetchone()
+        with app.app_context():
+            # Obtener lead
+            lead = Lead.query.get(lead_id)
 
-        if not lead_data:
-            logger.error(f"Lead {lead_id} no encontrado")
-            return {'success': False, 'error': f'Lead {lead_id} no encontrado'}
+            if not lead:
+                logger.error(f"Lead {lead_id} no encontrado")
+                return {'success': False, 'error': f'Lead {lead_id} no encontrado'}
 
-        lead_name, phone = lead_data
+            # Enviar recordatorio
+            reminder_service = ReminderService()
+            class_datetime = datetime.strptime(class_datetime_str, '%Y-%m-%d %H:%M:%S')
 
-        # Enviar recordatorio
-        result = reminder_service._send_reminder(
-            reminder_id=0,  # ID temporal
-            lead_name=lead_name,
-            phone=phone,
-            clase_tipo=clase_tipo,
-            class_datetime_str=class_datetime_str
-        )
+            result = reminder_service.send_reminder(
+                lead_id=lead_id,
+                class_datetime=class_datetime,
+                clase_tipo=clase_tipo
+            )
 
-        logger.info(f"✅ Recordatorio enviado: {result}")
-        return result
+            logger.info(f"✅ Recordatorio enviado: {result}")
+            return result
 
     except Exception as e:
         logger.error(f"❌ Error en tarea send_immediate_reminder: {e}")
@@ -153,6 +168,8 @@ def schedule_trial_reminders(lead_id, trial_week_id, clase_tipo, start_date):
     """
     Tarea bajo demanda para programar todos los recordatorios de una semana de prueba
     Se ejecuta cuando se confirma un agendamiento
+
+    MIGRADO A SQLALCHEMY
 
     Args:
         lead_id: ID del prospecto

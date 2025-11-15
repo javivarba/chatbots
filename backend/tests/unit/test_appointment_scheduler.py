@@ -1,20 +1,16 @@
 """
-Unit tests for AppointmentScheduler service.
+Unit tests for AppointmentScheduler service - MIGRATED TO SQLALCHEMY
 """
 
 import pytest
 from datetime import datetime, timedelta
 from app.services.appointment_scheduler import AppointmentScheduler
-from app.utils.database import execute_query, execute_insert
+from app.models import Lead, Academy, LeadStatus
+from app import db
 
 
 class TestAppointmentSchedulerInit:
     """Test AppointmentScheduler initialization."""
-
-    def test_init_sets_db_path(self, test_db):
-        """Test that initialization sets the database path."""
-        scheduler = AppointmentScheduler()
-        assert scheduler.db_path == 'bjj_academy.db'
 
     def test_init_loads_horarios(self, test_db):
         """Test that initialization loads schedule data."""
@@ -45,7 +41,6 @@ class TestBookTrialWeek:
     def test_book_trial_week_success(self, test_db, sample_lead):
         """Test successfully booking a trial week."""
         scheduler = AppointmentScheduler()
-        scheduler.db_path = test_db
         scheduler.notifier = None  # Disable notifications for test
 
         result = scheduler.book_trial_week(
@@ -58,21 +53,16 @@ class TestBookTrialWeek:
         assert 'message' in result
         assert 'trial_id' in result
 
-        # Verify trial was created in database
-        trials = execute_query(
-            "SELECT * FROM trial_weeks WHERE lead_id = ?",
-            (sample_lead,),
-            db_path=test_db
-        )
-        assert len(trials) == 1
-        assert trials[0]['clase_tipo'] == 'adultos_jiujitsu'
-        assert trials[0]['status'] == 'active'
-        assert trials[0]['notes'] == 'Test booking notes'
+        # Verify lead was updated using SQLAlchemy
+        lead = Lead.query.get(sample_lead)
+        assert lead is not None
+        assert lead.trial_class_date is not None
+        assert lead.status == LeadStatus.SCHEDULED
+        assert lead.lead_score == 9
 
     def test_book_trial_week_duplicate_prevention(self, test_db, sample_lead):
         """Test that duplicate trial weeks are prevented."""
         scheduler = AppointmentScheduler()
-        scheduler.db_path = test_db
         scheduler.notifier = None
 
         # Book first trial
@@ -87,7 +77,6 @@ class TestBookTrialWeek:
     def test_book_trial_week_with_notification(self, test_db, sample_lead, mocker):
         """Test booking trial week with notification."""
         scheduler = AppointmentScheduler()
-        scheduler.db_path = test_db
 
         # Mock notifier
         mock_notifier = mocker.Mock()
@@ -130,7 +119,6 @@ class TestGetPhone:
     def test_get_phone_from_db(self, test_db):
         """Test getting phone from database."""
         scheduler = AppointmentScheduler()
-        scheduler.db_path = test_db
 
         phone = scheduler._get_phone()
         # Should get from test DB or return default
@@ -140,15 +128,10 @@ class TestGetPhone:
     def test_get_phone_default(self, test_db):
         """Test getting default phone when DB has none."""
         scheduler = AppointmentScheduler()
-        scheduler.db_path = test_db
 
-        # Clear academies table to test default
-        import sqlite3
-        conn = sqlite3.connect(test_db)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM academies")
-        conn.commit()
-        conn.close()
+        # Clear academies table using SQLAlchemy
+        Academy.query.delete()
+        db.session.commit()
 
         phone = scheduler._get_phone()
         assert phone == '+506-8888-8888'
@@ -171,13 +154,13 @@ class TestFormatAvailableSlotsMessage:
         slots = [
             {
                 'datetime': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d 18:00'),
-                'day_name': 'Lunes',
+                'day': 'Lunes',
                 'time': '18:00',
                 'clase_tipo': 'adultos_jiujitsu'
             },
             {
                 'datetime': (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d 18:00'),
-                'day_name': 'Martes',
+                'day': 'Martes',
                 'time': '18:00',
                 'clase_tipo': 'adultos_jiujitsu'
             }
@@ -194,23 +177,24 @@ class TestIntegrationBookingFlow:
 
     def test_complete_booking_flow(self, test_db):
         """Test complete flow from lead creation to trial booking."""
-        # Create lead in both tables
-        lead_id = execute_insert(
-            "INSERT INTO lead (phone_number, name, status) VALUES (?, ?, ?)",
-            ('+50644444444', 'Flow Test User', 'new'),
-            db_path=test_db
-        )
+        # Create lead using SQLAlchemy
+        academy = Academy.query.first()
 
-        # Also insert in 'leads' table for appointment_scheduler
-        execute_insert(
-            "INSERT INTO leads (id, phone, name, status) VALUES (?, ?, ?, ?)",
-            (lead_id, '+50644444444', 'Flow Test User', 'new'),
-            db_path=test_db
+        lead = Lead(
+            academy_id=academy.id,
+            phone='+50644444444',
+            name='Flow Test User',
+            status=LeadStatus.NEW,
+            source='whatsapp',
+            lead_score=5,
+            created_at=datetime.now()
         )
+        db.session.add(lead)
+        db.session.commit()
+        lead_id = lead.id
 
         # Book trial
         scheduler = AppointmentScheduler()
-        scheduler.db_path = test_db
         scheduler.notifier = None
 
         result = scheduler.book_trial_week(lead_id, 'adultos_jiujitsu', 'Integration test')
@@ -218,13 +202,10 @@ class TestIntegrationBookingFlow:
         # Verify everything
         assert result['success'] is True
 
-        # Check trial in DB
-        trials = execute_query(
-            "SELECT * FROM trial_weeks WHERE lead_id = ?",
-            (lead_id,),
-            db_path=test_db
-        )
-        assert len(trials) == 1
+        # Check lead was updated using SQLAlchemy
+        lead = Lead.query.get(lead_id)
+        assert lead.trial_class_date is not None
+        assert lead.status == LeadStatus.SCHEDULED
 
         # Verify message has key information
         message = result['message']

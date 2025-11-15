@@ -1,23 +1,7 @@
 # Utils package
 
-from .database import (
-    DatabaseConfig,
-    get_db_connection,
-    get_db_cursor,
-    execute_query,
-    execute_insert,
-    execute_update,
-    table_exists,
-    get_table_info
-)
+# DEPRECATED: database.py has been moved to deprecated/database.py
+# Production code should use SQLAlchemy models directly (app.models)
+# Only test_database.py imports from deprecated.database for legacy testing
 
-__all__ = [
-    'DatabaseConfig',
-    'get_db_connection',
-    'get_db_cursor',
-    'execute_query',
-    'execute_insert',
-    'execute_update',
-    'table_exists',
-    'get_table_info'
-]
+__all__ = []

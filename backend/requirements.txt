@@ -6,8 +6,7 @@ Flask-SQLAlchemy==3.1.1
 # Database
 SQLAlchemy==2.0.36
 alembic==1.13.0
-# psycopg2-binary==2.9.9  # Commented: requires Visual C++ Build Tools on Windows + Python 3.13
-# Alternative: Install PostgreSQL support only when needed in production (Linux/Docker)
+psycopg[binary]>=3.2.0  # PostgreSQL adapter (v3, compatible with Python 3.13 on Windows)
 
 # AI/Communication
 openai==1.57.4

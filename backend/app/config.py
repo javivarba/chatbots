@@ -11,7 +11,8 @@ load_dotenv()
 
 class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///bjj_academy.db')
+    # PostgreSQL as default, fallback to SQLite for backward compatibility
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'postgresql://postgres:password@localhost:5432/bjj_academy')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # OpenAI
