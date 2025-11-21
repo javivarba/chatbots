@@ -1,12 +1,12 @@
 """
-Unit tests for Dashboard API routes.
+Unit tests for Dashboard API routes - MIGRATED TO SQLALCHEMY
 """
 
 import pytest
 import json
 from datetime import datetime
-from app import create_app
-from app.utils.database import execute_insert, execute_update
+from app import create_app, db
+from app.models import Lead, Conversation, Message, MessageDirection, LeadStatus
 
 
 @pytest.fixture
@@ -14,7 +14,6 @@ def app(test_db):
     """Create Flask app for testing."""
     app = create_app()
     app.config['TESTING'] = True
-    app.config['DATABASE_PATH'] = test_db
     return app
 
 
@@ -38,15 +37,8 @@ class TestStatsEndpoint:
         assert 'needs_followup' in data
         assert 'conversion_rate' in data
 
-    def test_get_stats_with_data(self, client, test_db):
+    def test_get_stats_with_data(self, client, test_db, sample_lead):
         """Test getting stats with data."""
-        # Add test data
-        lead_id = execute_insert(
-            "INSERT INTO lead (phone_number, name, status) VALUES (?, ?, ?)",
-            ('+50611111111', 'Test User', 'new'),
-            db_path=test_db
-        )
-
         response = client.get('/api/stats')
         assert response.status_code == 200
 
@@ -84,17 +76,31 @@ class TestLeadsEndpoint:
 
     def test_get_leads_with_status_filter(self, client, test_db):
         """Test filtering leads by status."""
-        # Add leads with different statuses
-        execute_insert(
-            "INSERT INTO lead (phone_number, name, status) VALUES (?, ?, ?)",
-            ('+50611111111', 'User 1', 'new'),
-            db_path=test_db
+        # Add leads with different statuses using SQLAlchemy
+        from app.models import Academy
+        academy = Academy.query.first()
+
+        lead1 = Lead(
+            academy_id=academy.id,
+            phone='+50611111111',
+            name='User 1',
+            status=LeadStatus.NEW,
+            source='whatsapp',
+            lead_score=5,
+            created_at=datetime.now()
         )
-        execute_insert(
-            "INSERT INTO lead (phone_number, name, status) VALUES (?, ?, ?)",
-            ('+50622222222', 'User 2', 'contacted'),
-            db_path=test_db
+        lead2 = Lead(
+            academy_id=academy.id,
+            phone='+50622222222',
+            name='User 2',
+            status=LeadStatus.CONTACTED,
+            source='whatsapp',
+            lead_score=6,
+            created_at=datetime.now()
         )
+        db.session.add(lead1)
+        db.session.add(lead2)
+        db.session.commit()
 
         response = client.get('/api/leads?status=new')
         assert response.status_code == 200
@@ -102,7 +108,7 @@ class TestLeadsEndpoint:
         data = json.loads(response.data)
         # All leads should have 'new' status
         for lead in data:
-            assert lead['status'] == 'new'
+            assert lead['status'] == LeadStatus.NEW
 
 
 class TestLeadDetailEndpoint:
@@ -139,14 +145,14 @@ class TestUpdateLeadStatusEndpoint:
         """Test successfully updating lead status."""
         response = client.post(
             f'/api/leads/{sample_lead}/update-status',
-            json={'status': 'interested'},
+            json={'status': LeadStatus.INTERESTED},
             content_type='application/json'
         )
         assert response.status_code == 200
 
         data = json.loads(response.data)
         assert data['success'] is True
-        assert data['status'] == 'interested'
+        assert data['status'] == LeadStatus.INTERESTED
 
     def test_update_status_missing_status(self, client, test_db, sample_lead):
         """Test updating status without providing status."""
@@ -202,13 +208,11 @@ class TestAppointmentsEndpoint:
 
     def test_get_appointments_with_data(self, client, test_db, sample_lead):
         """Test getting appointments with data."""
-        # Create an appointment
-        execute_insert(
-            """INSERT INTO appointment (lead_id, appointment_datetime, status, confirmed)
-               VALUES (?, ?, ?, ?)""",
-            (sample_lead, '2025-11-20 18:00:00', 'scheduled', 1),
-            db_path=test_db
-        )
+        # Set trial_class_date for the lead using SQLAlchemy
+        lead = Lead.query.get(sample_lead)
+        lead.trial_class_date = datetime.strptime('2025-11-20 18:00:00', '%Y-%m-%d %H:%M:%S')
+        lead.status = LeadStatus.SCHEDULED
+        db.session.commit()
 
         response = client.get('/api/appointments')
         assert response.status_code == 200
@@ -233,7 +237,7 @@ class TestDetermineNextAction:
         from app.api.dashboard_routes import determine_next_action
 
         action = determine_next_action(
-            status='new',
+            status=LeadStatus.NEW,
             interest_level=5,
             days_since_contact=None,
             last_sender='user',
@@ -248,7 +252,7 @@ class TestDetermineNextAction:
         from app.api.dashboard_routes import determine_next_action
 
         action = determine_next_action(
-            status='new',
+            status=LeadStatus.NEW,
             interest_level=5,
             days_since_contact=1,
             last_sender='user',
@@ -263,7 +267,7 @@ class TestDetermineNextAction:
         from app.api.dashboard_routes import determine_next_action
 
         action = determine_next_action(
-            status='interested',
+            status=LeadStatus.INTERESTED,
             interest_level=8,
             days_since_contact=4,
             last_sender='assistant',
@@ -278,7 +282,7 @@ class TestDetermineNextAction:
         from app.api.dashboard_routes import determine_next_action
 
         action = determine_next_action(
-            status='interested',
+            status=LeadStatus.INTERESTED,
             interest_level=9,
             days_since_contact=1,
             last_sender='assistant',

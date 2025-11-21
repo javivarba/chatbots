@@ -4,14 +4,14 @@
 
 ## 📋 Descripción
 
-Bot inteligente de WhatsApp que automatiza la atención al cliente, captura de leads y agendamiento de clases de prueba para academias de BJJ. Utiliza IA (OpenAI GPT-3.5) para respuestas naturales y cuenta con un dashboard administrativo completo.
+Bot inteligente de WhatsApp que automatiza la atención al cliente, captura de leads y agendamiento de clases de prueba para academias de BJJ. Utiliza IA (OpenAI GPT-4o-mini) para respuestas naturales de alta calidad y cuenta con un dashboard administrativo completo.
 
 ## ✨ Características Principales
 
 ### 🤖 Bot de WhatsApp
-- **Respuestas Inteligentes**: Integración con OpenAI GPT-3.5 para conversaciones naturales
+- **Respuestas Inteligentes**: Integración con OpenAI GPT-4o-mini para conversaciones naturales de alta calidad
 - **Detección de Intenciones**: Identifica automáticamente interés en clases, precios, horarios
-- **Multiidioma**: Responde en español de forma natural y contextual
+- **Voseo Costarricense**: Respuestas personalizadas con tono local natural
 - **Fallback Automático**: Respuestas predefinidas cuando OpenAI no está disponible
 
 ### 📊 Sistema de Leads
@@ -218,22 +218,27 @@ git push heroku main
 ## 🛠️ Tecnologías Utilizadas
 
 - **Backend**: Flask (Python 3.8+)
-- **Base de Datos**: SQLite (desarrollo), PostgreSQL (producción recomendado)
-- **IA**: OpenAI GPT-3.5 Turbo
+- **Base de Datos**: PostgreSQL (con SQLAlchemy ORM)
+- **IA**: OpenAI GPT-4o-mini (mejor calidad y costo-efectivo que GPT-3.5)
 - **Mensajería**: Twilio WhatsApp Business API
+- **Task Queue**: Celery + Redis (para recordatorios automáticos)
 - **Frontend**: HTML5, Tailwind CSS, JavaScript Vanilla
 - **Herramientas**: ngrok, Git
 
 ## 📝 Variables de Entorno
 
-| Variable | Descripción | Requerido |
-|----------|-------------|-----------|
-| `OPENAI_API_KEY` | API Key de OpenAI | Opcional* |
-| `TWILIO_ACCOUNT_SID` | ID de cuenta Twilio | Sí |
-| `TWILIO_AUTH_TOKEN` | Token de autenticación | Sí |
-| `TWILIO_WHATSAPP_NUMBER` | Número WhatsApp | Sí |
-| `FLASK_ENV` | Entorno (development/production) | No |
-| `SECRET_KEY` | Clave secreta Flask | Sí |
+| Variable | Descripción | Requerido | Default |
+|----------|-------------|-----------|---------|
+| `OPENAI_API_KEY` | API Key de OpenAI | Opcional* | - |
+| `OPENAI_MODEL` | Modelo de OpenAI | No | `gpt-4o-mini` |
+| `OPENAI_MAX_TOKENS` | Tokens máximos por respuesta | No | `1000` |
+| `OPENAI_TEMPERATURE` | Creatividad (0.0-1.0) | No | `0.7` |
+| `TWILIO_ACCOUNT_SID` | ID de cuenta Twilio | Sí | - |
+| `TWILIO_AUTH_TOKEN` | Token de autenticación | Sí | - |
+| `TWILIO_WHATSAPP_NUMBER` | Número WhatsApp | Sí | - |
+| `DATABASE_URL` | URL PostgreSQL | Sí | - |
+| `FLASK_ENV` | Entorno (development/production) | No | `development` |
+| `SECRET_KEY` | Clave secreta Flask | Sí | - |
 
 *Si no se configura OpenAI, el bot usa respuestas predefinidas
 
@@ -273,11 +278,11 @@ Este proyecto está bajo la Licencia MIT - ver archivo [LICENSE](LICENSE) para d
 
 ## 🙏 Agradecimientos
 
-- OpenAI por GPT-3.5
+- OpenAI por GPT-4o-mini
 - Twilio por la API de WhatsApp
 - Comunidad de Flask
 - Academia BJJ por la oportunidad
 
 ---
 
-**Desarrollado con ❤️ para BJJ Academy | Septiembre 2024**
+**Desarrollado con ❤️ para BJJ Academy | Noviembre 2025**

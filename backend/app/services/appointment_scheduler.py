@@ -236,31 +236,13 @@ class AppointmentScheduler:
             # NUEVO: Programar recordatorios automáticos 24 horas antes de cada clase
             self._schedule_reminders(lead_id, lead.id, clase_tipo, start_date)
 
-            # Mensaje de confirmación para el cliente (SIN link de calendario)
-            confirmation = f"""✅ ¡SEMANA DE PRUEBA CONFIRMADA!
+            # Mensaje de confirmación para el cliente - VERSIÓN CONCISA (3-4 oraciones max)
+            confirmation = f"""¡Semana de prueba confirmada! {horario['nombre']}, {dias_texto} a las {horario['hora']}.
 
-📋 Detalles:
-- Clase: {horario['nombre']}
-- Días: {dias_texto}
-- Hora: {horario['hora']}
-- Primera clase: {next_class_date.strftime('%A %d/%m/%Y')}
-- Válido hasta: {end_date.strftime('%d/%m/%Y')}
+📍 Santo Domingo de Heredia - Waze: https://waze.com/ul/hd1u0y3qpc
+👕 Traé ropa deportiva, agua, y si tenés gi.
 
-📍 Ubicación: Santo Domingo de Heredia
-🗺️ Waze: https://waze.com/ul/hd1u0y3qpc
-
-👕 Qué traer:
-- Ropa deportiva cómoda (pantaloneta/lycra, camisa deportiva)
-- Sin zapatos
-- Agua
-- Si tenés gi, podés traerlo
-
-🎯 *La academia te contactará pronto para confirmar tu asistencia.*
-🔔 *Te enviaremos un recordatorio 24 horas antes de cada clase.*
-
-📞 Cualquier duda: {self._get_phone()}
-
-¡Te esperamos! 🥋"""
+Te enviaremos recordatorio 24 horas antes de cada clase. ¡Te esperamos! 🥋"""
 
             return {
                 'success': True,
@@ -334,11 +316,11 @@ class AppointmentScheduler:
                     start_date=start_date.strftime('%Y-%m-%d')
                 )
 
-                logger.info(f"✅ Tarea de recordatorios programada (Celery Task ID: {result.id})")
+                logger.info(f"OK: Tarea de recordatorios programada (Celery Task ID: {result.id})")
 
-            except ImportError:
-                # Si Celery no está disponible, programar directamente
-                logger.warning("⚠️ Celery no disponible, programando recordatorios directamente")
+            except (ImportError, Exception) as e:
+                # Si Celery falla, programar directamente (fallback)
+                logger.warning(f"Celery no disponible ({type(e).__name__}), programando recordatorios directamente")
                 from app.services.reminder_service import ReminderService
 
                 reminder_service = ReminderService()
@@ -349,11 +331,16 @@ class AppointmentScheduler:
                     start_date=start_date.strftime('%Y-%m-%d')
                 )
 
-                logger.info(f"Recordatorios programados directamente: {result}")
+                if result.get('success'):
+                    logger.info(f"OK: Recordatorios programados directamente: {result.get('count')} creados")
+                else:
+                    logger.error(f"ERROR: {result.get('message')}")
 
         except Exception as e:
             # No fallar el agendamiento si los recordatorios fallan
-            logger.error(f"⚠️ Error programando recordatorios (no crítico): {e}")
+            logger.error(f"ERROR programando recordatorios (no critico): {e}")
+            import traceback
+            traceback.print_exc()
 
     def _get_next_class_date(self, clase_tipo):
         """Calcula la fecha de la próxima clase disponible"""

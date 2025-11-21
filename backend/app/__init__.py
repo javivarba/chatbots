@@ -39,22 +39,29 @@ def create_app(config_name='default'):
         if request.method == 'POST':
             # Obtener datos del mensaje
             incoming_msg = request.values.get('Body', '').strip()
-            from_number = request.values.get('From', '').replace('whatsapp:', '')
+            from_number_raw = request.values.get('From', '')
             sender_name = request.values.get('ProfileName', '')
-            
-            print(f"[PHONE] Mensaje de {from_number}: {incoming_msg}")
-            
+
+            # Normalizar el número de teléfono ANTES de procesar
+            import re
+            from_number = re.sub(r'[^\d+]', '', from_number_raw)
+
+            print(f"[WEBHOOK] Número RAW: {from_number_raw}")
+            print(f"[WEBHOOK] Número NORMALIZADO: {from_number}")
+            print(f"[WEBHOOK] Nombre del perfil: {sender_name}")
+            print(f"[WEBHOOK] Mensaje: {incoming_msg}")
+
             # Procesar mensaje y guardar en BD
             response_text = message_handler.process_message(
-                from_number, 
-                incoming_msg, 
+                from_number,
+                incoming_msg,
                 sender_name
             )
-            
+
             # Crear respuesta de Twilio
             resp = MessagingResponse()
             resp.message(response_text)
-            
+
             return str(resp)
         else:
             return jsonify({'status': 'active', 'webhook': 'ready'})

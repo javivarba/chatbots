@@ -290,6 +290,19 @@ class NotificationService:
             logger.error("No se pudo importar academy_info")
             return {}
 
+    def send_whatsapp(self, to, message):
+        """
+        Envía un mensaje de WhatsApp (método público para recordatorios)
+
+        Args:
+            to: Número de teléfono destino
+            message: Mensaje a enviar
+
+        Returns:
+            Dict con success y message/sid
+        """
+        return self._send_whatsapp_notification(to, message)
+
     def test_notification(self):
         """Envía una notificación de prueba"""
         test_lead = {

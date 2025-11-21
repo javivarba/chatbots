@@ -71,8 +71,11 @@ class MessageHandler:
 
         try:
             self.openai_client = OpenAI(api_key=api_key)
-            self.model = os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo')
-            self.max_tokens = int(os.getenv('OPENAI_MAX_TOKENS', 600))
+            # Modelo: gpt-4o-mini (recomendado) - mejor calidad, más barato, soporte a largo plazo
+            # Alternativas: gpt-4o (máxima calidad), gpt-3.5-turbo (legacy, no recomendado)
+            self.model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+            # Max tokens incrementado para aprovechar capacidad de gpt-4o-mini (soporta hasta 16,384)
+            self.max_tokens = int(os.getenv('OPENAI_MAX_TOKENS', 1000))
             self.temperature = float(os.getenv('OPENAI_TEMPERATURE', 0.7))
             self.ai_enabled = True
 
@@ -90,25 +93,38 @@ class MessageHandler:
         """
         Procesar mensaje - SIEMPRE intenta IA primero
         """
-        logger.info(f"\n[PHONE] Mensaje de {phone_number}: {message}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"[PROCESS] Nuevo mensaje de {phone_number}")
+        logger.info(f"[PROCESS] Contenido: {message}")
+        logger.info(f"[PROCESS] Nombre del perfil: {name}")
+        logger.info(f"{'='*60}")
 
         # 1. Obtener o crear lead
         lead_id = self._get_or_create_lead(phone_number, name)
 
-        # 2. Obtener o crear conversación
+        # 2. Detectar si el usuario proporcionó su nombre en el mensaje
+        detected_name = self._detect_name_in_message(message)
+        if detected_name:
+            logger.info(f"[NAME_DETECTION] Nombre detectado en mensaje: {detected_name}")
+            self._update_lead_name(lead_id, detected_name)
+
+        # 3. Obtener o crear conversación
         conv_id = self._get_or_create_conversation(lead_id)
 
-        # 3. Guardar mensaje del usuario
+        # 4. Guardar mensaje del usuario
         self._save_message(conv_id, MessageDirection.INBOUND, message)
 
-        # 4. INTENTAR GENERAR RESPUESTA CON IA
+        # 5. INTENTAR GENERAR RESPUESTA CON IA
         response = self._generate_ai_response(message, lead_id, conv_id)
 
-        # 5. Guardar respuesta del bot
+        # 6. Guardar respuesta del bot
         self._save_message(conv_id, MessageDirection.OUTBOUND, response)
 
-        # 6. Actualizar lead
+        # 7. Actualizar lead
         self._update_lead_status(lead_id, message)
+
+        logger.info(f"[PROCESS] Respuesta generada: {response[:100]}...")
+        logger.info(f"{'='*60}\n")
 
         return response
 
@@ -297,17 +313,62 @@ INSTRUCCIONES:
             "¡Queremos ayudarte a empezar tu SEMANA DE PRUEBA GRATIS! 🥋"
         )
 
+    # ========== MÉTODOS AUXILIARES ==========
+
+    def _detect_name_in_message(self, message):
+        """
+        Detecta si el usuario proporcionó su nombre en el mensaje
+        Patrones: 'Mi nombre es...', 'Me llamo...', 'Soy...', o solo el nombre
+        """
+        import re
+
+        msg = message.strip()
+
+        # Patrón 1: "Mi nombre es Juan" o "Me llamo Juan"
+        patterns = [
+            r'(?:mi nombre es|me llamo|soy)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)',
+            r'(?:nombre:?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, msg, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip()
+                # Verificar que no sea una palabra común
+                if name.lower() not in ['hola', 'si', 'no', 'bueno', 'ok', 'gracias']:
+                    return name
+
+        # Patrón 2: Solo un nombre (2 palabras capitalizadas, probablemente nombre y apellido)
+        if re.match(r'^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+$', msg):
+            return msg.strip()
+
+        return None
+
+    def _update_lead_name(self, lead_id, new_name):
+        """Actualiza el nombre del lead si es diferente"""
+        lead = Lead.query.get(lead_id)
+        if lead and new_name:
+            old_name = lead.name
+            if old_name != new_name and old_name in ['WhatsApp User', 'Usuario', None, '']:
+                logger.info(f"[UPDATE] Cambiando nombre de '{old_name}' a '{new_name}' para lead_id: {lead_id}")
+                lead.name = new_name
+                db.session.commit()
+            elif old_name != new_name:
+                logger.info(f"[UPDATE] Lead ya tiene nombre '{old_name}', detectado '{new_name}' - no se actualiza")
+
     # ========== MÉTODOS DE BASE DE DATOS (SQLAlchemy) ==========
 
     def _get_or_create_lead(self, phone_number, name=None):
         """Obtener o crear lead usando SQLAlchemy"""
-        # Normalizar teléfono
+        # Normalizar teléfono (ya viene normalizado del webhook, pero por si acaso)
         import re
         normalized_phone = re.sub(r'[^\d+]', '', phone_number)
 
+        logger.info(f"[LEAD] Buscando lead con teléfono: {normalized_phone}")
         lead = Lead.query.filter_by(phone=normalized_phone).first()
 
         if not lead:
+            logger.info(f"[LEAD] No encontrado. Creando nuevo lead con nombre: {name}")
             # Obtener primera academy
             academy = Academy.query.first()
             if not academy:
@@ -324,17 +385,27 @@ INSTRUCCIONES:
             )
             db.session.add(lead)
             db.session.commit()
+            logger.info(f"[LEAD] Nuevo lead creado - ID: {lead.id}, Nombre: {lead.name}")
+        else:
+            logger.info(f"[LEAD] Lead encontrado - ID: {lead.id}, Nombre actual: {lead.name}")
+            # Si el lead existe pero tiene nombre genérico y ahora tenemos un nombre real, actualizarlo
+            if name and name != '' and lead.name in ['WhatsApp User', 'Usuario', None]:
+                logger.info(f"[LEAD] Actualizando nombre genérico '{lead.name}' a '{name}'")
+                lead.name = name
+                db.session.commit()
 
         return lead.id
 
     def _get_or_create_conversation(self, lead_id):
         """Obtener o crear conversación usando SQLAlchemy"""
+        logger.info(f"[CONVERSATION] Buscando conversación activa para lead_id: {lead_id}")
         conversation = Conversation.query.filter_by(
             lead_id=lead_id,
             is_active=True
         ).first()
 
         if not conversation:
+            logger.info(f"[CONVERSATION] No encontrada. Creando nueva conversación para lead_id: {lead_id}")
             lead = Lead.query.get(lead_id)
 
             conversation = Conversation(
@@ -350,6 +421,9 @@ INSTRUCCIONES:
             )
             db.session.add(conversation)
             db.session.commit()
+            logger.info(f"[CONVERSATION] Nueva conversación creada - ID: {conversation.id}")
+        else:
+            logger.info(f"[CONVERSATION] Conversación encontrada - ID: {conversation.id}, Mensajes: {conversation.message_count}")
 
         return conversation.id
 
@@ -406,17 +480,22 @@ INSTRUCCIONES:
 
     def _get_conversation_history(self, conv_id, limit=5):
         """Obtener historial de conversación usando SQLAlchemy"""
+        logger.info(f"[HISTORY] Obteniendo últimos {limit} mensajes de conversación ID: {conv_id}")
         messages = Message.query.filter_by(
             conversation_id=conv_id
         ).order_by(Message.created_at.desc()).limit(limit).all()
 
+        logger.info(f"[HISTORY] Encontrados {len(messages)} mensajes")
+
         history = []
         for msg in messages:
+            sender = 'user' if msg.direction == MessageDirection.INBOUND else 'assistant'
             history.append({
-                'sender': 'user' if msg.direction == MessageDirection.INBOUND else 'assistant',
+                'sender': sender,
                 'content': msg.content,
                 'timestamp': msg.created_at.isoformat() if msg.created_at else None
             })
+            logger.info(f"[HISTORY] - {sender}: {msg.content[:50]}...")
 
         # Invertir para orden cronológico
         history.reverse()
