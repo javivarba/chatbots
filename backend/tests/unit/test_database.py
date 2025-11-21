@@ -1,10 +1,16 @@
 """
 Unit tests for database utilities module.
+
+DEPRECATED: These tests are for legacy SQLite utilities in app/utils/deprecated/database.py
+They are excluded from pytest by default (see pytest.ini --ignore flag)
+
+The project has been migrated to PostgreSQL with SQLAlchemy.
+Use tests in test_message_handler.py, test_appointment_scheduler.py, etc. instead.
 """
 
 import pytest
 import sqlite3
-from app.utils.database import (
+from app.utils.deprecated.database import (
     DatabaseConfig,
     get_db_connection,
     get_db_cursor,

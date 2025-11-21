@@ -2,13 +2,16 @@
 Servicio de Recordatorios para BJJ Mingo
 Envía recordatorios automáticos 24 horas antes de cada clase
 Incluye integración con Celery para tareas programadas
+MIGRADO A SQLALCHEMY + POSTGRESQL (SIMPLIFICADO)
+NOTA: Funcionalidad completa de recordatorios requiere modelo ClassReminder
 """
 
 import os
 import logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from app.utils.database import get_db_connection, get_db_cursor
+from app import db
+from app.models import Lead
 
 load_dotenv(override=True)
 
@@ -21,11 +24,11 @@ class ReminderService:
     - Crea recordatorios cuando se agenda una clase
     - Envía notificaciones 24 horas antes
     - Trackea estado de recordatorios enviados
+
+    NOTA: Versión simplificada sin tabla class_reminders
     """
 
     def __init__(self):
-        self.db_path = 'bjj_academy.db'
-
         # Inicializar servicio de notificaciones Twilio
         try:
             from app.services.notification_service import NotificationService
@@ -67,7 +70,9 @@ class ReminderService:
     def schedule_trial_week_reminders(self, lead_id, trial_week_id, clase_tipo, start_date):
         """
         Programa recordatorios para toda la semana de prueba
-        Crea un recordatorio por cada día de clase durante la semana
+
+        NOTA: Versión simplificada - solo registra en logs
+        Para implementación completa, crear modelo ClassReminder
 
         Args:
             lead_id: ID del prospecto
@@ -88,7 +93,7 @@ class ReminderService:
             start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
             end_datetime = start_datetime + timedelta(days=7)
 
-            reminders_created = []
+            reminders_planned = []
 
             # Iterar los próximos 7 días
             current_date = start_datetime
@@ -105,316 +110,143 @@ class ReminderService:
                         second=0
                     )
 
-                    # Crear recordatorio
-                    reminder_id = self._create_reminder(
-                        lead_id=lead_id,
-                        trial_week_id=trial_week_id,
-                        clase_tipo=clase_tipo,
-                        class_datetime=class_datetime
-                    )
+                    # Registrar en logs (sin guardar en BD por ahora)
+                    reminders_planned.append({
+                        'date': class_datetime.strftime('%Y-%m-%d'),
+                        'day': self.dias_nombres[day_of_week],
+                        'time': horario['hora'],
+                        'send_at': (class_datetime - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M')
+                    })
 
-                    if reminder_id:
-                        reminders_created.append({
-                            'id': reminder_id,
-                            'date': class_datetime.strftime('%Y-%m-%d'),
-                            'day': self.dias_nombres[day_of_week],
-                            'time': horario['hora']
-                        })
+                    logger.info(f"📅 Recordatorio planeado para {class_datetime.strftime('%Y-%m-%d %H:%M')}")
 
                 current_date += timedelta(days=1)
 
-            logger.info(f"✅ Creados {len(reminders_created)} recordatorios para trial_week {trial_week_id}")
+            logger.info(f"✅ {len(reminders_planned)} recordatorios planeados para lead {lead_id}")
+            logger.warning("⚠️ Recordatorios no se guardan en BD (requiere modelo ClassReminder)")
 
             return {
                 'success': True,
-                'message': f'{len(reminders_created)} recordatorios programados',
-                'reminders': reminders_created
+                'message': f'{len(reminders_planned)} recordatorios planeados (sin persistencia)',
+                'reminders': reminders_planned
             }
 
         except Exception as e:
-            logger.error(f"Error programando recordatorios: {e}")
+            logger.error(f"Error planeando recordatorios: {e}")
             return {'success': False, 'message': str(e)}
 
-    def _create_reminder(self, lead_id, trial_week_id=None, appointment_id=None,
-                        clase_tipo='adultos_jiujitsu', class_datetime=None):
+    def send_reminder(self, lead_id, class_datetime, clase_tipo):
         """
-        Crea un recordatorio en la base de datos
+        Envía un recordatorio inmediato a un lead
 
-        Returns:
-            ID del recordatorio creado o None si hubo error
-        """
-        try:
-            with get_db_cursor(db_path=self.db_path) as cursor:
-                # Verificar si ya existe un recordatorio para esta clase
-                cursor.execute("""
-                    SELECT id FROM class_reminders
-                    WHERE lead_id = ? AND class_datetime = ?
-                """, (lead_id, class_datetime.strftime('%Y-%m-%d %H:%M:%S')))
-
-                existing = cursor.fetchone()
-                if existing:
-                    logger.info(f"Recordatorio ya existe para lead {lead_id} en {class_datetime}")
-                    return existing[0]
-
-                # Crear nuevo recordatorio
-                cursor.execute("""
-                    INSERT INTO class_reminders
-                    (lead_id, trial_week_id, appointment_id, clase_tipo, class_datetime, reminder_status)
-                    VALUES (?, ?, ?, ?, ?, 'pending')
-                """, (lead_id, trial_week_id, appointment_id, clase_tipo,
-                     class_datetime.strftime('%Y-%m-%d %H:%M:%S')))
-
-                reminder_id = cursor.lastrowid
-                logger.info(f"Recordatorio creado: ID {reminder_id} para {class_datetime}")
-                return reminder_id
-
-        except Exception as e:
-            logger.error(f"Error creando recordatorio: {e}")
-            return None
-
-    def check_and_send_reminders(self):
-        """
-        Verifica qué clases están a 24 horas y envía recordatorios
-        Esta función debe ejecutarse periódicamente (cada hora con Celery)
-
-        Returns:
-            Dict con estadísticas de recordatorios enviados
-        """
-        try:
-            # Calcular ventana de tiempo (24 horas desde ahora, +/- 1 hora de margen)
-            now = datetime.now()
-            window_start = now + timedelta(hours=23)
-            window_end = now + timedelta(hours=25)
-
-            logger.info(f"🔍 Buscando recordatorios entre {window_start} y {window_end}")
-
-            # Buscar recordatorios pendientes en la ventana de tiempo
-            with get_db_connection(db_path=self.db_path) as conn:
-                cursor = conn.cursor()
-
-                cursor.execute("""
-                    SELECT
-                        cr.id,
-                        cr.lead_id,
-                        cr.clase_tipo,
-                        cr.class_datetime,
-                        l.name,
-                        l.phone_number
-                    FROM class_reminders cr
-                    JOIN lead l ON cr.lead_id = l.id
-                    WHERE cr.reminder_status = 'pending'
-                    AND cr.class_datetime BETWEEN ? AND ?
-                    ORDER BY cr.class_datetime
-                """, (window_start.strftime('%Y-%m-%d %H:%M:%S'),
-                     window_end.strftime('%Y-%m-%d %H:%M:%S')))
-
-                pending_reminders = cursor.fetchall()
-
-            if not pending_reminders:
-                logger.info("No hay recordatorios pendientes en esta ventana")
-                return {'success': True, 'sent': 0, 'failed': 0}
-
-            logger.info(f"📬 Encontrados {len(pending_reminders)} recordatorios pendientes")
-
-            sent_count = 0
-            failed_count = 0
-
-            # Enviar cada recordatorio
-            for reminder in pending_reminders:
-                reminder_id, lead_id, clase_tipo, class_datetime_str, lead_name, phone = reminder
-
-                result = self._send_reminder(
-                    reminder_id=reminder_id,
-                    lead_name=lead_name,
-                    phone=phone,
-                    clase_tipo=clase_tipo,
-                    class_datetime_str=class_datetime_str
-                )
-
-                if result['success']:
-                    sent_count += 1
-                else:
-                    failed_count += 1
-
-            logger.info(f"✅ Recordatorios enviados: {sent_count}, Fallidos: {failed_count}")
-
-            return {
-                'success': True,
-                'sent': sent_count,
-                'failed': failed_count,
-                'total': len(pending_reminders)
-            }
-
-        except Exception as e:
-            logger.error(f"Error verificando recordatorios: {e}")
-            return {'success': False, 'error': str(e)}
-
-    def _send_reminder(self, reminder_id, lead_name, phone, clase_tipo, class_datetime_str):
-        """
-        Envía un recordatorio individual por WhatsApp
+        Args:
+            lead_id: ID del lead
+            class_datetime: Datetime de la clase
+            clase_tipo: Tipo de clase
 
         Returns:
             Dict con success y mensaje
         """
         try:
-            # Parsear fecha/hora
-            class_datetime = datetime.strptime(class_datetime_str, '%Y-%m-%d %H:%M:%S')
+            lead = Lead.query.get(lead_id)
 
-            # Construir mensaje
-            horario = self.horarios[clase_tipo]
-            day_name = self.dias_nombres[class_datetime.weekday() + 1]
+            if not lead:
+                return {'success': False, 'message': 'Lead no encontrado'}
 
-            message = f"""🔔 *RECORDATORIO DE CLASE*
+            if not self.notifier:
+                logger.warning("NotificationService no disponible")
+                return {'success': False, 'message': 'Servicio de notificaciones no disponible'}
 
-¡Hola {lead_name}! 👋
+            # Obtener info de la clase
+            horario = self.horarios.get(clase_tipo, {})
+            clase_nombre = horario.get('nombre', 'Clase de Jiu-Jitsu')
 
-Te recordamos que mañana {day_name} {class_datetime.strftime('%d/%m/%Y')} tenés clase de:
+            # Formatear fecha/hora para el mensaje
+            day_name = class_datetime.strftime('%A')
+            date_formatted = class_datetime.strftime('%d/%m/%Y')
+            time_formatted = class_datetime.strftime('%H:%M')
 
-🥋 *{horario['nombre']}*
-⏰ Hora: {horario['hora']}
+            # Mensaje de recordatorio
+            mensaje = f"""🔔 ¡Recordatorio de Clase!
+
+Hola {lead.name}! 👋
+
+Te recordamos que mañana tenés tu clase de {clase_nombre}:
+
+📅 {day_name} {date_formatted}
+🕐 {time_formatted}
 📍 Santo Domingo de Heredia
-
 🗺️ Waze: https://waze.com/ul/hd1u0y3qpc
 
-👕 Recordá traer:
+👕 Qué traer:
 - Ropa deportiva cómoda
 - Agua
-- Toalla
+- Si tenés gi, podés traerlo
 
 ¡Te esperamos! 🥋
 
-Si no podés asistir, avisanos por favor.
+Si no podés asistir, avisanos por favor."""
 
----
-BJJ Mingo"""
+            # Enviar notificación
+            result = self.notifier.send_whatsapp(
+                to=lead.phone,
+                message=mensaje
+            )
 
-            # Enviar mensaje por WhatsApp
-            if self.notifier and self.notifier.twilio_available:
-                send_result = self.notifier._send_whatsapp_notification(phone, message)
-
-                if send_result['success']:
-                    # Marcar como enviado
-                    self._update_reminder_status(
-                        reminder_id,
-                        status='sent',
-                        sent_at=datetime.now()
-                    )
-                    logger.info(f"✅ Recordatorio {reminder_id} enviado a {phone}")
-                    return {'success': True, 'message': 'Recordatorio enviado'}
-                else:
-                    # Marcar como fallido
-                    self._update_reminder_status(
-                        reminder_id,
-                        status='failed',
-                        error_message=send_result['message']
-                    )
-                    logger.error(f"❌ Error enviando recordatorio {reminder_id}: {send_result['message']}")
-                    return {'success': False, 'message': send_result['message']}
+            if result['success']:
+                logger.info(f"✅ Recordatorio enviado a {lead.phone}")
+                return {
+                    'success': True,
+                    'message': 'Recordatorio enviado',
+                    'sid': result.get('sid')
+                }
             else:
-                # NotificationService no disponible
-                logger.warning(f"⚠️ NotificationService no disponible, recordatorio {reminder_id} no enviado")
-                logger.info(f"Mensaje que se hubiera enviado:\n{message}")
-
-                # Marcar como fallido con explicación
-                self._update_reminder_status(
-                    reminder_id,
-                    status='failed',
-                    error_message='NotificationService no disponible'
-                )
-                return {'success': False, 'message': 'NotificationService no disponible'}
+                logger.error(f"❌ Error enviando recordatorio: {result['message']}")
+                return result
 
         except Exception as e:
-            logger.error(f"Error enviando recordatorio {reminder_id}: {e}")
-            self._update_reminder_status(
-                reminder_id,
-                status='failed',
-                error_message=str(e)
-            )
+            logger.error(f"Error enviando recordatorio: {e}")
             return {'success': False, 'message': str(e)}
 
-    def _update_reminder_status(self, reminder_id, status, sent_at=None, error_message=None):
+    def get_pending_reminders(self):
         """
-        Actualiza el estado de un recordatorio
+        Obtiene recordatorios pendientes que deben enviarse
+
+        NOTA: Versión simplificada - retorna lista vacía
+        Para implementación completa, crear modelo ClassReminder
+
+        Returns:
+            Lista de recordatorios pendientes
         """
-        try:
-            with get_db_cursor(db_path=self.db_path) as cursor:
-                if sent_at:
-                    cursor.execute("""
-                        UPDATE class_reminders
-                        SET reminder_status = ?, reminder_sent_at = ?
-                        WHERE id = ?
-                    """, (status, sent_at.strftime('%Y-%m-%d %H:%M:%S'), reminder_id))
-                elif error_message:
-                    cursor.execute("""
-                        UPDATE class_reminders
-                        SET reminder_status = ?, error_message = ?
-                        WHERE id = ?
-                    """, (status, error_message, reminder_id))
-                else:
-                    cursor.execute("""
-                        UPDATE class_reminders
-                        SET reminder_status = ?
-                        WHERE id = ?
-                    """, (status, reminder_id))
+        logger.warning("⚠️ get_pending_reminders: Requiere modelo ClassReminder")
+        return []
 
-                logger.info(f"Recordatorio {reminder_id} actualizado a estado: {status}")
-
-        except Exception as e:
-            logger.error(f"Error actualizando recordatorio {reminder_id}: {e}")
-
-    def get_pending_reminders_count(self):
+    def mark_reminder_sent(self, reminder_id):
         """
-        Obtiene la cantidad de recordatorios pendientes
-        Útil para monitoreo
+        Marca un recordatorio como enviado
+
+        NOTA: Versión simplificada - solo registra en logs
+        Para implementación completa, crear modelo ClassReminder
         """
-        try:
-            with get_db_connection(db_path=self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT COUNT(*) FROM class_reminders
-                    WHERE reminder_status = 'pending'
-                    AND class_datetime > datetime('now')
-                """)
-                count = cursor.fetchone()[0]
-                return count
-        except Exception as e:
-            logger.error(f"Error contando recordatorios: {e}")
-            return 0
+        logger.warning(f"⚠️ mark_reminder_sent({reminder_id}): Requiere modelo ClassReminder")
+        return {'success': True, 'message': 'Simulado - sin persistencia'}
 
-    def test_reminder(self, lead_id):
+    def get_lead_reminders(self, lead_id):
         """
-        Envía un recordatorio de prueba inmediatamente (sin esperar 24 horas)
-        Útil para testing
+        Obtiene todos los recordatorios de un lead
+
+        NOTA: Versión simplificada - retorna lista vacía
+        Para implementación completa, crear modelo ClassReminder
         """
-        try:
-            # Obtener información del lead
-            with get_db_connection(db_path=self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT name, phone_number FROM lead WHERE id = ?
-                """, (lead_id,))
-                lead_data = cursor.fetchone()
+        logger.warning(f"⚠️ get_lead_reminders({lead_id}): Requiere modelo ClassReminder")
+        return []
 
-            if not lead_data:
-                return {'success': False, 'message': f'Lead {lead_id} no encontrado'}
+    def cancel_reminder(self, reminder_id):
+        """
+        Cancela un recordatorio programado
 
-            lead_name, phone = lead_data
-
-            # Crear fecha de prueba (mañana a las 6pm)
-            tomorrow = datetime.now() + timedelta(days=1)
-            tomorrow = tomorrow.replace(hour=18, minute=0, second=0)
-
-            # Enviar recordatorio de prueba
-            result = self._send_reminder(
-                reminder_id=0,  # ID temporal para prueba
-                lead_name=lead_name,
-                phone=phone,
-                clase_tipo='adultos_jiujitsu',
-                class_datetime_str=tomorrow.strftime('%Y-%m-%d %H:%M:%S')
-            )
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error en test de recordatorio: {e}")
-            return {'success': False, 'message': str(e)}
+        NOTA: Versión simplificada - solo registra en logs
+        Para implementación completa, crear modelo ClassReminder
+        """
+        logger.warning(f"⚠️ cancel_reminder({reminder_id}): Requiere modelo ClassReminder")
+        return {'success': True, 'message': 'Simulado - sin persistencia'}
