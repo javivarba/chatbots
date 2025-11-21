@@ -4,6 +4,9 @@ Gestiona tareas asíncronas y programadas como:
 - Envío de recordatorios 24 horas antes de clases
 - Actualizaciones de estado de leads
 - Limpieza de datos antiguos
+
+NOTA: Redis Cloud Free tier cierra conexiones inactivas.
+Se configuran retries y health checks para manejar esto.
 """
 
 import os
@@ -16,20 +19,56 @@ load_dotenv(override=True)
 # Crear instancia de Celery
 celery_app = Celery(
     'bjj_mingo',
-    broker=os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/1'),
-    backend=os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/2')
+    broker=os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0'),
+    backend=os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
 )
 
-# Configuración
+# Configuración optimizada para Redis Cloud Free tier
 celery_app.conf.update(
     task_serializer='json',
     accept_content=['json'],
     result_serializer='json',
-    timezone='America/Costa_Rica',  # Zona horaria de Costa Rica
+    timezone='America/Costa_Rica',
     enable_utc=True,
-    result_expires=3600,  # Los resultados expiran después de 1 hora
+    result_expires=3600,
     task_track_started=True,
-    task_time_limit=300,  # 5 minutos máximo por tarea
+    task_time_limit=300,
+
+    # === CONFIGURACIÓN PARA REDIS CLOUD FREE (conexiones inestables) ===
+
+    # Retry automático de tareas que fallan por conexión
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+
+    # Reconexión automática del broker
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
+    broker_connection_max_retries=10,
+
+    # Health check y timeouts del broker
+    broker_heartbeat=10,
+    broker_pool_limit=1,  # Usar una sola conexión (Free tier limit)
+
+    # Configuración del transport Redis
+    broker_transport_options={
+        'visibility_timeout': 3600,
+        'socket_timeout': 30,
+        'socket_connect_timeout': 30,
+        'retry_on_timeout': True,
+        'health_check_interval': 10,
+    },
+
+    # Backend Redis también necesita configuración
+    redis_backend_health_check_interval=10,
+    result_backend_transport_options={
+        'socket_timeout': 30,
+        'socket_connect_timeout': 30,
+        'retry_on_timeout': True,
+    },
+
+    # Retry de tareas fallidas
+    task_default_retry_delay=60,  # 1 minuto entre retries
+    task_max_retries=3,
 )
 
 # Configurar tareas periódicas (Celery Beat)

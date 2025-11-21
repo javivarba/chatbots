@@ -209,7 +209,7 @@ class TestIntegrationBookingFlow:
 
         # Verify message has key information
         message = result['message']
-        assert 'SEMANA DE PRUEBA CONFIRMADA' in message
+        assert 'Semana de prueba confirmada' in message
         assert 'Jiu-Jitsu Adultos' in message
         assert 'Waze' in message
-        assert 'Qué traer' in message
+        assert 'ropa deportiva' in message

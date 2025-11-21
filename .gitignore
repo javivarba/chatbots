@@ -52,3 +52,7 @@ backend/old_files/
 # Ngrok
 ngrok.exe
 ngrok
+*.log
+conversation_log.txt
+lead_log.txt
+.pytest_cache/

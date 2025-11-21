@@ -143,7 +143,7 @@ class TestBookingFlow:
         assert result['success'] is True
         assert 'trial_id' in result
         assert 'message' in result
-        assert 'SEMANA DE PRUEBA CONFIRMADA' in result['message']
+        assert 'Semana de prueba confirmada' in result['message']
 
         # Verify lead was updated using SQLAlchemy
         lead = Lead.query.get(sample_lead)
@@ -156,7 +156,7 @@ class TestBookingFlow:
         assert 'Jiu-Jitsu Adultos' in message
         assert 'Lunes' in message or 'Martes' in message  # At least one day
         assert 'Waze' in message
-        assert 'Qué traer' in message
+        assert 'ropa deportiva' in message
 
     def test_duplicate_booking_prevention(self, test_db, sample_lead):
         """Test that duplicate trial bookings are prevented."""

@@ -1,15 +1,16 @@
 """
-Integration tests for API endpoints.
+Integration tests for API endpoints - MIGRATED TO SQLALCHEMY
 
 Tests the complete flow of API requests including database interactions.
+NOTE: Simplified version - uses trial_class_date field instead of appointment/trial_weeks tables
 """
 
 import pytest
 import json
 from datetime import datetime, timedelta
 
-from app import create_app
-from app.utils.database import execute_insert, execute_query
+from app import create_app, db
+from app.models import Lead, Conversation, Message, MessageDirection, LeadStatus, Academy
 
 
 @pytest.fixture
@@ -17,7 +18,6 @@ def app(test_db):
     """Create Flask app for integration testing."""
     app = create_app()
     app.config['TESTING'] = True
-    app.config['DATABASE_PATH'] = test_db
     return app
 
 
@@ -36,36 +36,35 @@ class TestDashboardStatsIntegration:
         Test stats endpoint with realistic data scenario.
 
         Scenario:
-        - 5 new leads
+        - 2 new leads
         - 2 contacted leads
-        - 3 interested leads
-        - 1 scheduled appointment
+        - 1 interested lead with scheduled trial
         """
-        # Create leads with different statuses
+        academy = Academy.query.first()
+
+        # Create leads with different statuses using SQLAlchemy
         leads_data = [
-            ('+50611111111', 'User 1', 'new'),
-            ('+50622222222', 'User 2', 'new'),
-            ('+50633333333', 'User 3', 'contacted'),
-            ('+50644444444', 'User 4', 'contacted'),
-            ('+50655555555', 'User 5', 'interested'),
+            ('+50611111111', 'User 1', LeadStatus.NEW, None),
+            ('+50622222222', 'User 2', LeadStatus.NEW, None),
+            ('+50633333333', 'User 3', LeadStatus.CONTACTED, None),
+            ('+50644444444', 'User 4', LeadStatus.CONTACTED, None),
+            ('+50655555555', 'User 5', LeadStatus.SCHEDULED, datetime.now() + timedelta(days=2)),
         ]
 
-        lead_ids = []
-        for phone, name, status in leads_data:
-            lead_id = execute_insert(
-                "INSERT INTO lead (phone_number, name, status) VALUES (?, ?, ?)",
-                (phone, name, status),
-                db_path=test_db
+        for phone, name, status, trial_date in leads_data:
+            lead = Lead(
+                academy_id=academy.id,
+                phone=phone,
+                name=name,
+                status=status,
+                source='whatsapp',
+                lead_score=5,
+                trial_class_date=trial_date,
+                created_at=datetime.now()
             )
-            lead_ids.append(lead_id)
+            db.session.add(lead)
 
-        # Create appointment for one lead
-        execute_insert(
-            """INSERT INTO appointment (lead_id, appointment_datetime, status, confirmed)
-               VALUES (?, ?, 'scheduled', 1)""",
-            (lead_ids[4], (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d 18:00:00')),
-            db_path=test_db
-        )
+        db.session.commit()
 
         # Get stats
         response = client.get('/api/stats')
@@ -77,7 +76,6 @@ class TestDashboardStatsIntegration:
         assert data['total_leads'] == 5
         assert data['new'] == 2
         assert data['contacted'] == 2
-        assert data['interested'] == 1
         assert data['scheduled'] == 1
         assert data['conversion_rate'] == 20.0  # 1/5 = 20%
 
@@ -97,19 +95,31 @@ class TestLeadsEndpointIntegration:
         4. Update lead status
         5. Add note to lead
         """
-        # Step 1: Create lead via database
-        lead_id = execute_insert(
-            "INSERT INTO lead (phone_number, name, status, interest_level) VALUES (?, ?, ?, ?)",
-            ('+50699999999', 'Flow Test', 'new', 5),
-            db_path=test_db
+        academy = Academy.query.first()
+
+        # Step 1: Create lead using SQLAlchemy
+        lead = Lead(
+            academy_id=academy.id,
+            phone='+50699999999',
+            name='Flow Test',
+            status=LeadStatus.NEW,
+            source='whatsapp',
+            lead_score=5,
+            created_at=datetime.now()
         )
+        db.session.add(lead)
+        db.session.commit()
+        lead_id = lead.id
 
         # Create conversation
-        conv_id = execute_insert(
-            "INSERT INTO conversation (lead_id, academy_id, status) VALUES (?, 1, 'active')",
-            (lead_id,),
-            db_path=test_db
+        conv = Conversation(
+            lead_id=lead_id,
+            is_active=True,
+            created_at=datetime.now(),
+            last_message_at=datetime.now()
         )
+        db.session.add(conv)
+        db.session.commit()
 
         # Step 2: Get lead list
         response = client.get('/api/leads')
@@ -130,20 +140,16 @@ class TestLeadsEndpointIntegration:
         # Step 4: Update lead status
         response = client.post(
             f'/api/leads/{lead_id}/update-status',
-            json={'status': 'interested'},
+            json={'status': LeadStatus.INTERESTED},
             content_type='application/json'
         )
         assert response.status_code == 200
         result = json.loads(response.data)
         assert result['success'] is True
 
-        # Verify status was updated
-        leads = execute_query(
-            "SELECT status FROM lead WHERE id = ?",
-            (lead_id,),
-            db_path=test_db
-        )
-        assert leads[0]['status'] == 'interested'
+        # Verify status was updated using SQLAlchemy
+        lead = Lead.query.get(lead_id)
+        assert lead.status == LeadStatus.INTERESTED
 
         # Step 5: Add note
         response = client.post(
@@ -154,33 +160,41 @@ class TestLeadsEndpointIntegration:
         assert response.status_code == 200
 
         # Verify note was added
-        messages = execute_query(
-            "SELECT * FROM message WHERE conversation_id = ? AND sender = 'admin'",
-            (conv_id,),
-            db_path=test_db
-        )
+        messages = Message.query.filter_by(
+            conversation_id=conv.id,
+            direction=MessageDirection.OUTBOUND
+        ).all()
         assert len(messages) >= 1
-        assert any('Integration test note' in m['content'] for m in messages)
+        assert any('Integration test note' in m.content for m in messages)
 
     def test_leads_filtering(self, client, test_db):
         """Test leads filtering by status."""
+        academy = Academy.query.first()
+
         # Create leads with different statuses
-        statuses = ['new', 'contacted', 'interested', 'new', 'contacted']
+        statuses = [LeadStatus.NEW, LeadStatus.CONTACTED, LeadStatus.INTERESTED, LeadStatus.NEW, LeadStatus.CONTACTED]
         for i, status in enumerate(statuses):
-            execute_insert(
-                "INSERT INTO lead (phone_number, name, status) VALUES (?, ?, ?)",
-                (f'+5061111111{i}', f'User {i}', status),
-                db_path=test_db
+            lead = Lead(
+                academy_id=academy.id,
+                phone=f'+5061111111{i}',
+                name=f'User {i}',
+                status=status,
+                source='whatsapp',
+                lead_score=5,
+                created_at=datetime.now()
             )
+            db.session.add(lead)
+
+        db.session.commit()
 
         # Filter by 'new' status
-        response = client.get('/api/leads?status=new')
+        response = client.get(f'/api/leads?status={LeadStatus.NEW}')
         assert response.status_code == 200
         leads = json.loads(response.data)
 
         # All returned leads should have 'new' status
         for lead in leads:
-            assert lead['status'] == 'new'
+            assert lead['status'] == LeadStatus.NEW
 
         # Should have 2 new leads
         assert len(leads) == 2
@@ -192,27 +206,21 @@ class TestAppointmentsIntegration:
 
     def test_appointments_list_with_lead_info(self, client, test_db):
         """Test appointments endpoint returns correct lead information."""
-        # Create lead
-        lead_id = execute_insert(
-            "INSERT INTO lead (phone_number, name, status) VALUES (?, ?, ?)",
-            ('+50688888888', 'Appointment Test User', 'interested'),
-            db_path=test_db
+        academy = Academy.query.first()
+
+        # Create lead using SQLAlchemy
+        lead = Lead(
+            academy_id=academy.id,
+            phone='+50688888888',
+            name='Appointment Test User',
+            status=LeadStatus.SCHEDULED,
+            source='whatsapp',
+            lead_score=8,
+            trial_class_date=datetime.strptime('2025-11-20 18:00:00', '%Y-%m-%d %H:%M:%S'),
+            created_at=datetime.now()
         )
-
-        # Create multiple appointments
-        appointments_data = [
-            ('2025-11-20 18:00:00', 'scheduled', 1),
-            ('2025-11-22 18:00:00', 'scheduled', 0),
-            ('2025-11-15 18:00:00', 'cancelled', 0),
-        ]
-
-        for datetime_str, status, confirmed in appointments_data:
-            execute_insert(
-                """INSERT INTO appointment (lead_id, appointment_datetime, status, confirmed)
-                   VALUES (?, ?, ?, ?)""",
-                (lead_id, datetime_str, status, confirmed),
-                db_path=test_db
-            )
+        db.session.add(lead)
+        db.session.commit()
 
         # Get appointments
         response = client.get('/api/appointments')
@@ -220,18 +228,15 @@ class TestAppointmentsIntegration:
 
         appointments = json.loads(response.data)
 
-        # Should not include cancelled appointments
-        assert all(a['status'] != 'cancelled' for a in appointments)
+        # Should have at least 1 appointment
+        assert len(appointments) >= 1
 
-        # Should have 2 scheduled appointments
-        scheduled = [a for a in appointments if a['status'] == 'scheduled']
-        assert len(scheduled) >= 2
-
-        # Verify lead info is included
-        for apt in scheduled:
-            if apt['lead_phone'] == '+50688888888':
-                assert apt['lead_name'] == 'Appointment Test User'
-                assert apt['lead_id'] == lead_id
+        # Find our appointment
+        our_apt = next((a for a in appointments if a['lead_phone'] == '+50688888888'), None)
+        assert our_apt is not None
+        assert our_apt['lead_name'] == 'Appointment Test User'
+        assert our_apt['lead_id'] == lead.id
+        assert our_apt['status'] == LeadStatus.SCHEDULED
 
 
 @pytest.mark.integration
@@ -244,33 +249,48 @@ class TestCompleteAPIWorkflow:
         Test complete workflow from new lead to scheduled appointment.
 
         Workflow:
-        1. Lead is created (via message handling - simulated here)
+        1. Lead is created
         2. Check stats - should show 1 new lead
         3. View lead detail
         4. Update lead to interested
-        5. Book trial week (simulated)
+        5. Schedule trial (set trial_class_date)
         6. Check stats - should show 1 scheduled
         7. View appointments
         """
+        academy = Academy.query.first()
+
         # Step 1: Create lead
-        lead_id = execute_insert(
-            "INSERT INTO lead (phone_number, name, status, interest_level) VALUES (?, ?, ?, ?)",
-            ('+50677777777', 'Workflow Test', 'new', 5),
-            db_path=test_db
+        lead = Lead(
+            academy_id=academy.id,
+            phone='+50677777777',
+            name='Workflow Test',
+            status=LeadStatus.NEW,
+            source='whatsapp',
+            lead_score=5,
+            created_at=datetime.now()
         )
+        db.session.add(lead)
+        db.session.commit()
+        lead_id = lead.id
 
         # Create conversation and messages
-        conv_id = execute_insert(
-            "INSERT INTO conversation (lead_id, academy_id, status) VALUES (?, 1, 'active')",
-            (lead_id,),
-            db_path=test_db
+        conv = Conversation(
+            lead_id=lead_id,
+            is_active=True,
+            created_at=datetime.now(),
+            last_message_at=datetime.now()
         )
+        db.session.add(conv)
+        db.session.commit()
 
-        execute_insert(
-            "INSERT INTO message (conversation_id, sender, content) VALUES (?, 'user', 'Hola')",
-            (conv_id,),
-            db_path=test_db
+        msg = Message(
+            conversation_id=conv.id,
+            direction=MessageDirection.INBOUND,
+            content='Hola',
+            created_at=datetime.now()
         )
+        db.session.add(msg)
+        db.session.commit()
 
         # Step 2: Check initial stats
         response = client.get('/api/stats')
@@ -281,33 +301,23 @@ class TestCompleteAPIWorkflow:
         response = client.get(f'/api/leads/{lead_id}')
         assert response.status_code == 200
         detail = json.loads(response.data)
-        assert detail['lead']['status'] == 'new'
+        assert detail['lead']['status'] == LeadStatus.NEW
         assert len(detail['messages']) >= 1
 
         # Step 4: Update to interested
         response = client.post(
             f'/api/leads/{lead_id}/update-status',
-            json={'status': 'interested'},
+            json={'status': LeadStatus.INTERESTED},
             content_type='application/json'
         )
         assert response.status_code == 200
 
-        # Step 5: Book trial week
-        trial_id = execute_insert(
-            """INSERT INTO trial_weeks (lead_id, clase_tipo, start_date, end_date, status)
-               VALUES (?, 'jiu_jitsu_adultos', ?, ?, 'active')""",
-            (lead_id, datetime.now().strftime('%Y-%m-%d'),
-             (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')),
-            db_path=test_db
-        )
-
-        # Create appointment
-        execute_insert(
-            """INSERT INTO appointment (lead_id, appointment_datetime, status, confirmed)
-               VALUES (?, ?, 'scheduled', 1)""",
-            (lead_id, (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d 18:00:00')),
-            db_path=test_db
-        )
+        # Step 5: Schedule trial (simulate booking)
+        lead = Lead.query.get(lead_id)
+        lead.status = LeadStatus.SCHEDULED
+        lead.trial_class_date = datetime.now() + timedelta(days=1)
+        lead.lead_score = 9
+        db.session.commit()
 
         # Step 6: Check updated stats
         response = client.get('/api/stats')
@@ -319,13 +329,8 @@ class TestCompleteAPIWorkflow:
         appointments = json.loads(response.data)
 
         # Find our appointment
-        our_apt = None
-        for apt in appointments:
-            if apt['lead_id'] == lead_id:
-                our_apt = apt
-                break
-
+        our_apt = next((a for a in appointments if a['lead_id'] == lead_id), None)
         assert our_apt is not None
-        assert our_apt['status'] == 'scheduled'
-        assert our_apt['confirmed'] == 1
+        assert our_apt['status'] == LeadStatus.SCHEDULED
+        assert our_apt['confirmed'] is True  # Scheduled status implies confirmed
         assert our_apt['lead_name'] == 'Workflow Test'
