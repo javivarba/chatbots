@@ -28,7 +28,7 @@ def sample_user(app):
             is_active=True,
             academy_id=1
         )
-        user.set_password('testpassword123')
+        user.set_password('test_password_not_real_123')
         db.session.add(user)
         db.session.commit()
         yield user
@@ -50,7 +50,7 @@ class TestUserRepositoryBasicCRUD:
             user = user_repo.create_user(
                 username='newuser',
                 email='newuser@example.com',
-                password='password123',
+                password='test_password_not_real_456',
                 role='staff',
                 academy_id=1
             )
@@ -60,7 +60,7 @@ class TestUserRepositoryBasicCRUD:
             assert user.email == 'newuser@example.com'
             assert user.role == 'staff'
             assert user.is_active is True
-            assert user.check_password('password123') is True
+            assert user.check_password('test_password_not_real_456') is True
 
             # Cleanup
             db.session.delete(user)
@@ -104,7 +104,7 @@ class TestUserRepositoryBasicCRUD:
             user = user_repo.create_user(
                 username='todelete',
                 email='delete@example.com',
-                password='password123',
+                password='test_password_not_real_789',
                 role='staff'
             )
             user_id = user.id
@@ -201,12 +201,12 @@ class TestUserRepositoryPasswordOperations:
     def test_update_password(self, app, user_repo, sample_user):
         """Test actualizar password"""
         with app.app_context():
-            new_password = 'newpassword456'
+            new_password = 'test_new_password_not_real_999'
 
             updated = user_repo.update_password(sample_user, new_password)
 
             assert updated.check_password(new_password) is True
-            assert updated.check_password('testpassword123') is False
+            assert updated.check_password('test_password_not_real_123') is False
 
     def test_password_hashed_on_create(self, app, user_repo):
         """Test que password se hashea al crear usuario"""
@@ -214,14 +214,14 @@ class TestUserRepositoryPasswordOperations:
             user = user_repo.create_user(
                 username='hashtest',
                 email='hash@example.com',
-                password='plaintext123',
+                password='test_plaintext_not_real_111',
                 role='staff'
             )
 
             # Password no debe guardarse en texto plano
-            assert user.password_hash != 'plaintext123'
+            assert user.password_hash != 'test_plaintext_not_real_111'
             # Pero check_password debe funcionar
-            assert user.check_password('plaintext123') is True
+            assert user.check_password('test_plaintext_not_real_111') is True
 
             # Cleanup
             db.session.delete(user)
@@ -282,7 +282,7 @@ class TestUserRepositoryValidation:
                 user_repo.create_user(
                     username=sample_user.username,  # Username duplicado
                     email='different@example.com',
-                    password='password123',
+                    password='test_password_not_real_222',
                     role='staff'
                 )
 
@@ -293,7 +293,7 @@ class TestUserRepositoryValidation:
                 user_repo.create_user(
                     username='differentuser',
                     email=sample_user.email,  # Email duplicado
-                    password='password123',
+                    password='test_password_not_real_333',
                     role='staff'
                 )
 

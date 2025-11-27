@@ -33,7 +33,7 @@ class LoginRequest(BaseModel):
             "examples": [
                 {
                     "username": "admin",
-                    "password": "Admin123456"
+                    "password": "example_password_not_real_123"
                 }
             ]
         }
@@ -83,8 +83,8 @@ class ChangePasswordRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "current_password": "OldPassword123",
-                    "new_password": "NewPassword456"
+                    "current_password": "example_old_password_not_real_456",
+                    "new_password": "example_new_password_not_real_789"
                 }
             ]
         }
@@ -154,7 +154,7 @@ class CreateUserRequest(BaseModel):
                 {
                     "username": "john_doe",
                     "email": "john@bjjacademy.com",
-                    "password": "SecurePass123",
+                    "password": "example_password_not_real_999",
                     "role": "staff",
                     "academy_id": 1
                 }
