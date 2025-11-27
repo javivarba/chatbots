@@ -103,9 +103,9 @@ class AppointmentScheduler:
         clase_tipo = None
         if 'striking' in message_lower:
             clase_tipo = 'adultos_striking'
-        elif any(word in message_lower for word in ['kid', 'niño', 'niña', 'hijo', 'hija', 'chiquito']):
+        elif any(word in message_lower for word in ['kid', 'niño', 'niña', 'hijo', 'hija', 'chiquito', 'sobrino', 'sobrina', 'nene', 'nena', 'bebé', 'bebe', 'pequeño', 'pequeña', 'menor']):
             clase_tipo = 'kids'
-        elif any(word in message_lower for word in ['junior', 'adolescente', 'teenager', 'chamaco']):
+        elif any(word in message_lower for word in ['junior', 'adolescente', 'teenager', 'chamaco', 'preadolescente']):
             clase_tipo = 'juniors'
         elif any(word in message_lower for word in ['adulto', 'jiu', 'jiujitsu', 'bjj']):
             clase_tipo = 'adultos_jiujitsu'

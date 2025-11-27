@@ -1,38 +1,45 @@
 """
-API Routes para el Dashboard - PostgreSQL con SQLAlchemy
+API Routes para el Dashboard - PostgreSQL with SQLAlchemy
+Protected with JWT authentication and rate limiting
+Refactored with Repository Pattern: 25/11/2025
+Pydantic Validation: 25/11/2025
 """
 
 from flask import Blueprint, jsonify, request
 from datetime import datetime, timedelta
-from app import db
-from app.models import Lead, Conversation, Message, MessageDirection, LeadStatus
-from sqlalchemy import func, desc
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from app import limiter
+from app.models import MessageDirection, LeadStatus
+from app.services.cache_service import cache
+from app.repositories.lead_repository import LeadRepository
+from app.repositories.conversation_repository import ConversationRepository, MessageRepository
+from app.schemas import UpdateLeadStatusRequest, AddLeadNoteRequest, CacheInvalidatePatternRequest, CacheInvalidateKeysRequest
+from app.utils.validation import validate_json
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api')
 
+# Initialize repositories
+lead_repo = LeadRepository()
+conversation_repo = ConversationRepository()
+message_repo = MessageRepository()
+
 @dashboard_bp.route('/stats')
+@jwt_required()
 def get_stats():
-    """Obtener estadísticas generales"""
+    """Obtener estadísticas generales usando repositories"""
 
     # Total de leads
-    total_leads = Lead.query.count()
+    total_leads = lead_repo.count()
 
-    # Leads por status
-    status_counts = db.session.query(
-        Lead.status, func.count(Lead.id)
-    ).group_by(Lead.status).all()
+    # Leads por status usando repository
+    status_counts = lead_repo.count_by_status()
 
-    status_dict = {status: count for status, count in status_counts}
+    # Leads agendados
+    scheduled = lead_repo.count(status=LeadStatus.SCHEDULED)
 
-    # Leads agendados (con trial_class_date)
-    scheduled = Lead.query.filter(Lead.status == LeadStatus.SCHEDULED).count()
-
-    # Leads que necesitan seguimiento (>3 días sin contacto)
-    three_days_ago = datetime.now() - timedelta(days=3)
-    needs_followup = Lead.query.filter(
-        Lead.status.notin_([LeadStatus.SCHEDULED, LeadStatus.CONVERTED]),
-        (Lead.last_contact_date == None) | (Lead.last_contact_date < three_days_ago)
-    ).count()
+    # Leads que necesitan seguimiento usando repository
+    needs_followup_leads = lead_repo.find_needs_followup(days=3)
+    needs_followup = len(needs_followup_leads)
 
     # Tasa de conversión
     conversion_rate = round((scheduled / total_leads * 100) if total_leads > 0 else 0, 1)
@@ -41,51 +48,46 @@ def get_stats():
         'total_leads': total_leads,
         'scheduled': scheduled,
         'needs_followup': needs_followup,
-        'new': status_dict.get('new', 0),
-        'contacted': status_dict.get('contacted', 0),
-        'interested': status_dict.get('interested', 0),
+        'new': status_counts.get('new', 0),
+        'contacted': status_counts.get('contacted', 0),
+        'interested': status_counts.get('interested', 0),
         'conversion_rate': conversion_rate
     })
 
 @dashboard_bp.route('/leads')
+@jwt_required()
 def get_leads():
-    """Obtener lista de leads con información accionable"""
+    """Obtener lista de leads con información accionable usando repositories"""
     status_filter = request.args.get('status')
 
-    # Query base
-    query = Lead.query
-
+    # Obtener leads usando repository
     if status_filter:
-        query = query.filter(Lead.status == status_filter)
+        leads = lead_repo.find_by_status(status_filter)
+    else:
+        leads = lead_repo.get_recent_leads(limit=1000)  # Ajustar límite según necesidad
 
     leads_data = []
     now = datetime.now()
 
-    for lead in query.order_by(desc(Lead.created_at)).all():
-        # Contar conversaciones y mensajes
-        conv_count = Conversation.query.filter_by(lead_id=lead.id).count()
+    for lead in leads:
+        # Obtener conversaciones usando repository
+        conversations = conversation_repo.find_by_lead(lead.id)
 
-        conversations = Conversation.query.filter_by(lead_id=lead.id).all()
+        # Contar mensajes
         total_messages = sum(
-            Message.query.filter_by(conversation_id=conv.id).count()
+            message_repo.count_messages_in_conversation(conv.id)
             for conv in conversations
         )
 
-        # Última conversación activa
-        last_conv = Conversation.query.filter_by(
-            lead_id=lead.id,
-            is_active=True
-        ).order_by(desc(Conversation.last_message_at)).first()
-
+        # Última conversación activa usando repository
+        last_conv = conversation_repo.find_active_conversation(lead.id)
         last_contact = last_conv.last_message_at if last_conv else None
 
-        # Último mensaje
+        # Último mensaje usando repository
         last_message = None
         last_sender = None
         if last_conv:
-            last_message = Message.query.filter_by(
-                conversation_id=last_conv.id
-            ).order_by(desc(Message.created_at)).first()
+            last_message = message_repo.get_last_message(last_conv.id)
 
             if last_message:
                 last_sender = 'user' if last_message.direction == MessageDirection.INBOUND else 'bot'
@@ -187,19 +189,20 @@ def determine_next_action(status, interest_level, days_since_contact, last_sende
     }
 
 @dashboard_bp.route('/leads/<int:lead_id>')
+@jwt_required()
 def get_lead_detail(lead_id):
-    """Obtener detalle de un lead específico"""
-    lead = Lead.query.get(lead_id)
+    """Obtener detalle de un lead específico usando repositories"""
+    lead = lead_repo.get_by_id(lead_id)
 
     if not lead:
         return jsonify({'error': 'Lead no encontrado'}), 404
 
-    # Obtener conversaciones y mensajes
-    conversations = Conversation.query.filter_by(lead_id=lead_id).all()
+    # Obtener conversaciones y mensajes usando repositories
+    conversations = conversation_repo.find_by_lead(lead_id)
 
     all_messages = []
     for conv in conversations:
-        messages = Message.query.filter_by(conversation_id=conv.id).order_by(Message.created_at).all()
+        messages = message_repo.find_by_conversation(conv.id)
         for msg in messages:
             all_messages.append({
                 'id': msg.id,
@@ -224,58 +227,68 @@ def get_lead_detail(lead_id):
     })
 
 @dashboard_bp.route('/leads/<int:lead_id>/update-status', methods=['POST'])
-def update_lead_status(lead_id):
-    """Actualizar el status de un lead"""
-    new_status = request.json.get('status')
-    if not new_status:
-        return jsonify({'error': 'Status requerido'}), 400
+@limiter.limit("30 per minute")  # Limitar actualizaciones de status
+@jwt_required()
+@validate_json(UpdateLeadStatusRequest)  # ✅ Validación automática con Pydantic
+def update_lead_status(validated_data: UpdateLeadStatusRequest, lead_id):
+    """
+    Actualizar el status de un lead usando repository
 
-    lead = Lead.query.get(lead_id)
+    Request Body (validado con Pydantic):
+        {
+            "status": "interested"  # new|contacted|interested|scheduled|converted|lost
+        }
+    """
+    # Datos ya validados por Pydantic
+    new_status = validated_data.status  # Ya validado contra enum
+
+    lead = lead_repo.get_by_id(lead_id)
     if not lead:
         return jsonify({'error': 'Lead no encontrado'}), 404
 
-    lead.status = new_status
-    lead.updated_at = datetime.now()
-    db.session.commit()
+    # Actualizar status usando repository
+    lead = lead_repo.update_status(lead, new_status)
 
     return jsonify({'success': True, 'status': new_status})
 
 @dashboard_bp.route('/leads/<int:lead_id>/add-note', methods=['POST'])
-def add_lead_note(lead_id):
-    """Agregar nota a un lead"""
-    note = request.json.get('note')
-    if not note:
-        return jsonify({'error': 'Nota requerida'}), 400
+@limiter.limit("20 per minute")  # Limitar creación de notas
+@jwt_required()
+@validate_json(AddLeadNoteRequest)  # ✅ Validación automática con Pydantic
+def add_lead_note(validated_data: AddLeadNoteRequest, lead_id):
+    """
+    Agregar nota a un lead usando repositories
 
-    lead = Lead.query.get(lead_id)
+    Request Body (validado con Pydantic):
+        {
+            "note": "Cliente muy interesado"  # 1-1000 chars, sanitizado para XSS
+        }
+    """
+    # Datos ya validados y sanitizados por Pydantic
+    note = validated_data.note  # Ya sanitizado (HTML escapado)
+
+    lead = lead_repo.get_by_id(lead_id)
     if not lead:
         return jsonify({'error': 'Lead no encontrado'}), 404
 
-    # Buscar conversación activa
-    conversation = Conversation.query.filter_by(
-        lead_id=lead_id,
-        is_active=True
-    ).first()
+    # Buscar conversación activa usando repository
+    conversation = conversation_repo.find_active_conversation(lead_id)
 
     if conversation:
-        # Crear mensaje de nota
-        message = Message(
+        # Crear mensaje de nota usando repository
+        message_repo.create_message(
             conversation_id=conversation.id,
-            direction=MessageDirection.OUTBOUND,  # Notas admin como outbound
             content=f"[NOTA ADMIN] {note}",
-            created_at=datetime.now()
+            direction=MessageDirection.OUTBOUND
         )
-        db.session.add(message)
-        db.session.commit()
 
     return jsonify({'success': True})
 
 @dashboard_bp.route('/appointments')
+@jwt_required()
 def get_appointments():
-    """Obtener todas las citas (leads con trial_class_date)"""
-    leads_with_appointments = Lead.query.filter(
-        Lead.trial_class_date != None
-    ).order_by(Lead.trial_class_date).all()
+    """Obtener todas las citas (leads con trial_class_date) usando repositories"""
+    leads_with_appointments = lead_repo.find_scheduled_leads()
 
     appointments = []
     for lead in leads_with_appointments:
@@ -290,3 +303,125 @@ def get_appointments():
         })
 
     return jsonify(appointments)
+
+@dashboard_bp.route('/cache/stats')
+@jwt_required()
+def get_cache_stats():
+    """Obtener estadísticas del sistema de caché"""
+    try:
+        stats = cache.get_stats()
+        return jsonify({
+            'success': True,
+            'cache': stats
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@dashboard_bp.route('/cache/clear', methods=['POST'])
+@limiter.limit("10 per hour")  # Operación sensible, limitar fuertemente
+@jwt_required()
+def clear_cache():
+    """
+    Limpiar caché - opciones:
+    - all: Limpiar todo el caché (PELIGROSO)
+    - pattern: Limpiar llaves que coincidan con patrón (ej: "lead:*")
+    - keys: Lista de llaves específicas a eliminar
+    Rate Limit: 10 por hora (operación sensible)
+
+    Request Body:
+        {
+            "action": "pattern",  # all|pattern|keys
+            "pattern": "lead:*",  # Si action=pattern
+            "keys": ["lead:1", "lead:2"]  # Si action=keys
+        }
+    """
+    try:
+        # Obtener action sin validación estricta para compatibilidad
+        action = request.json.get('action', 'pattern') if request.is_json else 'pattern'
+
+        if action == 'all':
+            # PELIGRO: Limpiar todo
+            success = cache.clear_all()
+            return jsonify({
+                'success': success,
+                'message': 'Caché completamente limpiado' if success else 'Error limpiando caché'
+            })
+
+        elif action == 'pattern':
+            pattern = request.json.get('pattern') if request.is_json else None
+            if not pattern:
+                return jsonify({'success': False, 'error': 'Patrón requerido'}), 400
+
+            # Validación básica del patrón (sin Pydantic por compatibilidad)
+            import re
+            if not re.match(r'^[a-zA-Z0-9:_*\-]+$', pattern):
+                return jsonify({'success': False, 'error': 'Patrón contiene caracteres no permitidos'}), 400
+
+            count = cache.delete_pattern(pattern)
+            return jsonify({
+                'success': True,
+                'message': f'{count} llaves eliminadas',
+                'count': count
+            })
+
+        elif action == 'keys':
+            keys = request.json.get('keys', []) if request.is_json else []
+            if not keys:
+                return jsonify({'success': False, 'error': 'Lista de llaves requerida'}), 400
+
+            count = 0
+            for key in keys:
+                if cache.delete(key):
+                    count += 1
+
+            return jsonify({
+                'success': True,
+                'message': f'{count} llaves eliminadas',
+                'count': count
+            })
+
+        else:
+            return jsonify({'success': False, 'error': 'Acción inválida'}), 400
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@dashboard_bp.route('/cache/invalidate/lead/<int:lead_id>', methods=['POST'])
+@limiter.limit("60 per minute")  # Limitar invalidaciones de caché
+@jwt_required()
+def invalidate_lead_cache(lead_id):
+    """Invalidar caché de un lead específico"""
+    try:
+        success = cache.invalidate_lead(lead_id)
+        return jsonify({
+            'success': success,
+            'message': f'Caché del lead {lead_id} invalidado' if success else 'Error invalidando caché'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@dashboard_bp.route('/cache/invalidate/conversation/<int:conv_id>', methods=['POST'])
+@limiter.limit("60 per minute")  # Limitar invalidaciones de caché
+@jwt_required()
+def invalidate_conversation_cache(conv_id):
+    """Invalidar caché de una conversación específica"""
+    try:
+        success = cache.invalidate_conversation(conv_id)
+        return jsonify({
+            'success': success,
+            'message': f'Caché de la conversación {conv_id} invalidado' if success else 'Error invalidando caché'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500

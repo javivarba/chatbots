@@ -19,6 +19,6 @@ echo NOTA: Mantener esta ventana abierta mientras el sistema esté en uso
 echo       Presionar Ctrl+C para detener
 echo.
 
-celery -A app.celery_app worker --loglevel=info --pool=solo
+celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1
 
 pause

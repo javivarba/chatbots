@@ -12,6 +12,10 @@ psycopg[binary]>=3.2.0  # PostgreSQL adapter (v3, compatible with Python 3.13 on
 openai==1.57.4
 twilio==8.5.0
 
+# Validation - Agregado 25/11/2025 - Actualizado para Python 3.13 compatibility
+pydantic==2.10.3  # Versión con wheels precompilados para Python 3.13 en Windows
+email-validator>=2.0.0  # Requerido para validación de emails
+
 # Utilities
 python-dotenv==1.0.0
 requests==2.31.0

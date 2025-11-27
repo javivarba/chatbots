@@ -18,6 +18,7 @@ load_dotenv(override=True)
 from openai import OpenAI
 
 from app.models import Lead, Conversation, Message, Academy
+from app.services.cache_service import cache
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +66,9 @@ class AIService:
                 self.client = None
     
     def generate_response(
-        self, 
-        message: str, 
-        lead: Lead, 
+        self,
+        message: str,
+        lead: Lead,
         conversation: Conversation,
         academy: Academy,
         use_history: bool = True
@@ -75,23 +76,37 @@ class AIService:
         """
         Genera una respuesta usando GPT con el contexto completo
         """
-        
+
         if not self.enabled or not self.client:
             logger.warning("OpenAI no disponible, usando respuestas predefinidas")
             return self._get_fallback_response(message, academy)
-        
+
         try:
+            # CACHE: Intentar obtener respuesta cacheada para preguntas frecuentes
+            # Solo cachear si NO hay historial (preguntas iniciales)
+            if not use_history:
+                query_context = {
+                    "lead_status": lead.status,
+                    "has_history": False
+                }
+                query_hash = cache.generate_query_hash(message, query_context)
+                cached_response = cache.get_ai_response(query_hash)
+
+                if cached_response:
+                    logger.info(f"[CACHE HIT] Respuesta de IA encontrada en caché")
+                    return cached_response
+
             # Construir el prompt del sistema
             system_prompt = self._build_system_prompt(academy, lead)
-            
+
             # Construir el historial de mensajes
             messages = [{"role": "system", "content": system_prompt}]
-            
+
             # Agregar historial si está habilitado
             if use_history:
                 history = self._get_conversation_history(conversation)
                 messages.extend(history)
-            
+
             # Agregar el mensaje actual
             messages.append({"role": "user", "content": message})
             
@@ -110,10 +125,20 @@ class AIService:
             # OpenAI ahora maneja el CTA de forma natural - no agregamos nada automáticamente
 
             logger.info(f"Respuesta generada exitosamente: {len(ai_response)} caracteres")
-            
+
+            # CACHE: Guardar respuesta en caché si no tiene historial
+            if not use_history:
+                query_context = {
+                    "lead_status": lead.status,
+                    "has_history": False
+                }
+                query_hash = cache.generate_query_hash(message, query_context)
+                cache.set_ai_response(query_hash, ai_response)
+                logger.info(f"[CACHE SET] Respuesta de IA guardada en caché")
+
             # Actualizar métricas (opcional)
             self._update_ai_metrics(conversation, response)
-            
+
             return ai_response
             
         except Exception as e:
@@ -124,13 +149,28 @@ class AIService:
         """
         Construye el prompt del sistema con información de BJJ Mingo
         """
-        try:
-            # Intentar importar el prompt base desde academy_info
-            from app.config.academy_info import get_system_prompt_base
-            base_prompt = get_system_prompt_base()
-            
-            # Agregar información del prospecto
-            lead_info = f"""
+        # CACHE: Intentar obtener el system prompt base del caché
+        base_prompt = cache.get_system_prompt()
+
+        if not base_prompt:
+            try:
+                # Intentar importar el prompt base desde academy_info
+                from app.config.academy_info import get_system_prompt_base
+                base_prompt = get_system_prompt_base()
+
+                # Guardar en caché para próximas llamadas
+                cache.set_system_prompt(base_prompt)
+                logger.info("[CACHE SET] System prompt guardado en caché")
+
+            except ImportError:
+                # Fallback si no se puede importar academy_info
+                logger.warning("No se pudo importar academy_info, usando prompt por defecto")
+                base_prompt = self._get_default_prompt_base(academy)
+        else:
+            logger.debug("[CACHE HIT] System prompt obtenido del caché")
+
+        # Agregar información del prospecto (esto NO se cachea porque cambia por lead)
+        lead_info = f"""
 
 CONTEXTO DEL PROSPECTO:
 - Nombre: {lead.name if lead.name != 'WhatsApp User' else 'No proporcionado'}
@@ -138,17 +178,12 @@ CONTEXTO DEL PROSPECTO:
 - Estado: {lead.status}
 - Fuente: {lead.source}
 """
-            
-            return base_prompt + lead_info
-            
-        except ImportError:
-            # Fallback si no se puede importar academy_info
-            logger.warning("No se pudo importar academy_info, usando prompt por defecto")
-            return self._get_default_prompt(academy, lead)
+
+        return base_prompt + lead_info
     
-    def _get_default_prompt(self, academy: Academy, lead: Lead) -> str:
-        """Prompt por defecto si academy_info no está disponible"""
-        
+    def _get_default_prompt_base(self, academy: Academy) -> str:
+        """Prompt base por defecto si academy_info no está disponible"""
+
         return f"""Sos "Mingo Asistente", un miembro del equipo de BJJ Mingo.
 
 ACADEMIA: BJJ Mingo
@@ -170,11 +205,6 @@ PRECIOS:
 - Niños: ₡30,000/mes
 
 🎁 SEMANA DE PRUEBA COMPLETAMENTE GRATIS
-
-PROSPECTO:
-- Nombre: {lead.name if lead.name != 'WhatsApp User' else 'No proporcionado'}
-- Teléfono: {lead.phone}
-- Estado: {lead.status}
 
 INSTRUCCIONES:
 1. Usá VOSEO costarricense (vení, querés, tenés, podés)
