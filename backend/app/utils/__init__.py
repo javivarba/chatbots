@@ -4,4 +4,6 @@
 # Production code should use SQLAlchemy models directly (app.models)
 # Only test_database.py imports from deprecated.database for legacy testing
 
-__all__ = []
+from .booking_validator import BookingValidator
+
+__all__ = ['BookingValidator']

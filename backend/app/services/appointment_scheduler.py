@@ -3,6 +3,7 @@ Appointment Scheduler Simplificado para BJJ Mingo
 Versión actualizada con horarios reales y sistema de semana de prueba
 Incluye notificaciones automáticas al staff
 MIGRADO A SQLALCHEMY + POSTGRESQL
+Actualizado: 27/11/2025 - Integración de BookingValidator
 """
 
 from datetime import datetime, timedelta
@@ -10,12 +11,16 @@ import re
 import logging
 from app import db
 from app.models import Academy, Lead, LeadStatus
+from app.utils.booking_validator import BookingValidator
 
 logger = logging.getLogger(__name__)
 
 
 class AppointmentScheduler:
     def __init__(self):
+        # Inicializar validador de fechas
+        self.validator = BookingValidator()
+
         # Inicializar servicio de notificaciones
         try:
             from app.services.notification_service import NotificationService
@@ -96,17 +101,22 @@ class AppointmentScheduler:
         return available
 
     def parse_appointment_request(self, message, lead_id=None):
-        """Interpretar mensaje para extraer tipo de clase, día y hora"""
+        """
+        Interpretar mensaje para extraer tipo de clase, día y hora
+        ACTUALIZADO: Ahora incluye validación de fechas con BookingValidator
+        """
         message_lower = message.lower()
 
-        # Detectar tipo de clase
+        # Detectar tipo de clase (orden específico: más específico primero)
         clase_tipo = None
         if 'striking' in message_lower:
             clase_tipo = 'adultos_striking'
+        # Detectar Juniors ANTES que Kids (más específico primero)
+        elif any(word in message_lower for word in ['junior', 'adolescente', 'teenager', 'chamaco', 'preadolescente', '11', '12', '13', '14', '15', '16']):
+            clase_tipo = 'juniors'
+        # Detectar Kids después (menos específico)
         elif any(word in message_lower for word in ['kid', 'niño', 'niña', 'hijo', 'hija', 'chiquito', 'sobrino', 'sobrina', 'nene', 'nena', 'bebé', 'bebe', 'pequeño', 'pequeña', 'menor']):
             clase_tipo = 'kids'
-        elif any(word in message_lower for word in ['junior', 'adolescente', 'teenager', 'chamaco', 'preadolescente']):
-            clase_tipo = 'juniors'
         elif any(word in message_lower for word in ['adulto', 'jiu', 'jiujitsu', 'bjj']):
             clase_tipo = 'adultos_jiujitsu'
         else:
@@ -140,18 +150,54 @@ class AppointmentScheduler:
         if not target_date and clase_tipo:
             target_date = self._get_next_available_day(clase_tipo)
 
-        # Si se detectó clase y día, construir datetime
+        # Si se detectó clase y día, VALIDAR con BookingValidator
         if clase_tipo and target_date:
             horario = self.horarios[clase_tipo]
-            datetime_str = f"{target_date.strftime('%Y-%m-%d')} {horario['hora']}:00"
+
+            # NUEVO: Validar fecha usando BookingValidator
+            validation = self.validator.validate_booking_date(
+                target_date,
+                clase_tipo,
+                horario['hora']
+            )
+
+            # Si la validación falla, retornar error con detalles
+            if not validation['valid']:
+                logger.warning(f"[SCHEDULER] ❌ Fecha inválida: {validation['error_type']}")
+                logger.warning(f"[SCHEDULER] Mensaje: {validation['message']}")
+
+                # Preparar respuesta con fecha sugerida si está disponible
+                response = {
+                    'parsed': False,
+                    'error_type': validation['error_type'],
+                    'error_message': validation['message'],
+                    'clase_tipo': clase_tipo,
+                    'clase_nombre': horario['nombre']
+                }
+
+                # Agregar fecha sugerida si existe
+                if validation.get('suggested_date'):
+                    suggested_date = validation['suggested_date']
+                    response['suggested_date'] = suggested_date
+                    response['suggested_date_formatted'] = self.validator.format_suggested_date(suggested_date)
+                    logger.info(f"[SCHEDULER] 💡 Fecha sugerida: {response['suggested_date_formatted']}")
+
+                return response
+
+            # ✅ Validación exitosa - Construir respuesta con datetime validado
+            class_datetime = validation['class_datetime']
+            datetime_str = class_datetime.strftime('%Y-%m-%d %H:%M:%S')
+
+            logger.info(f"[SCHEDULER] ✅ Fecha validada: {datetime_str} para {clase_tipo}")
 
             return {
                 'parsed': True,
                 'clase_tipo': clase_tipo,
-                'date': target_date.strftime('%Y-%m-%d'),
+                'date': class_datetime.strftime('%Y-%m-%d'),
                 'time': horario['hora'],
                 'datetime': datetime_str,
-                'clase_nombre': horario['nombre']
+                'clase_nombre': horario['nombre'],
+                'class_datetime': class_datetime  # datetime object completo
             }
 
         return {'parsed': False}
@@ -236,8 +282,29 @@ class AppointmentScheduler:
             # NUEVO: Programar recordatorios automáticos 24 horas antes de cada clase
             self._schedule_reminders(lead_id, lead.id, clase_tipo, start_date)
 
-            # Mensaje de confirmación para el cliente - VERSIÓN CONCISA (3-4 oraciones max)
-            confirmation = f"""¡Semana de prueba confirmada! {horario['nombre']}, {dias_texto} a las {horario['hora']}.
+            # Calcular tiempo hasta la primera clase
+            now = datetime.now()
+            hora_partes = horario['hora'].split(':')
+            primera_clase = start_date.replace(
+                hour=int(hora_partes[0]),
+                minute=int(hora_partes[1]),
+                second=0,
+                microsecond=0
+            )
+            hours_until_class = (primera_clase - now).total_seconds() / 3600
+
+            # Mensaje de confirmación dinámico según el tiempo hasta la clase
+            if hours_until_class < 24:
+                # Clase en menos de 24 horas - no mencionar recordatorio automático
+                confirmation = f"""¡Semana de prueba confirmada! {horario['nombre']}, {dias_texto} a las {horario['hora']}.
+
+📍 Santo Domingo de Heredia - Waze: https://waze.com/ul/hd1u0y3qpc
+👕 Traé ropa deportiva, agua, y si tenés gi.
+
+¡Te esperamos! 🥋"""
+            else:
+                # Clase en más de 24 horas - mencionar recordatorio automático
+                confirmation = f"""¡Semana de prueba confirmada! {horario['nombre']}, {dias_texto} a las {horario['hora']}.
 
 📍 Santo Domingo de Heredia - Waze: https://waze.com/ul/hd1u0y3qpc
 👕 Traé ropa deportiva, agua, y si tenés gi.
@@ -357,3 +424,97 @@ Te enviaremos recordatorio 24 horas antes de cada clase. ¡Te esperamos! 🥋"""
                 return date.replace(hour=int(hora_partes[0]), minute=int(hora_partes[1]))
 
         return today  # Fallback
+
+    def get_lead_booking(self, lead_id):
+        """
+        Obtiene la información de la reserva actual de un lead
+
+        Args:
+            lead_id: ID del lead
+
+        Returns:
+            Dict con:
+                - has_booking: bool
+                - message: str (mensaje formateado para el usuario)
+                - class_date: datetime (si tiene reserva)
+                - class_type: str (si tiene reserva)
+        """
+        lead = Lead.query.get(lead_id)
+
+        if not lead:
+            return {
+                'has_booking': False,
+                'message': 'No encontré tu información en el sistema.'
+            }
+
+        # Verificar si tiene una clase agendada
+        if not lead.trial_class_date or lead.status != LeadStatus.SCHEDULED:
+            return {
+                'has_booking': False,
+                'message': 'No tenés ninguna clase agendada actualmente. ¿Te gustaría agendar una clase de prueba gratis?'
+            }
+
+        # Obtener información de la clase
+        class_date = lead.trial_class_date
+
+        # Determinar tipo de clase basado en la fecha y hora
+        clase_tipo = self._detect_class_type_from_date(class_date)
+
+        if not clase_tipo:
+            # Fallback: mostrar info genérica
+            return {
+                'has_booking': True,
+                'class_date': class_date,
+                'message': f'Tenés una clase agendada para el {class_date.strftime("%d/%m/%Y")} a las {class_date.strftime("%H:%M")}.'
+            }
+
+        horario = self.horarios[clase_tipo]
+        dias_texto = self._get_dias_texto(horario['dias'])
+
+        # Formatear mensaje
+        day_of_week = class_date.weekday() + 1
+        day_name = self.dias_nombres[day_of_week]
+        date_str = class_date.strftime('%d/%m/%Y')
+        time_str = class_date.strftime('%H:%M')
+
+        message = f"""📅 Tu clase agendada:
+
+{horario['nombre']}
+{day_name} {date_str} a las {time_str}
+
+📍 Santo Domingo de Heredia
+🗺️ Waze: https://waze.com/ul/hd1u0y3qpc
+
+Horario regular: {dias_texto} a las {horario['hora']}
+
+¿Necesitás modificar tu reserva?"""
+
+        return {
+            'has_booking': True,
+            'class_date': class_date,
+            'class_type': clase_tipo,
+            'class_name': horario['nombre'],
+            'message': message
+        }
+
+    def _detect_class_type_from_date(self, class_date):
+        """
+        Detecta el tipo de clase basándose en el día de la semana y hora
+
+        Args:
+            class_date: datetime de la clase
+
+        Returns:
+            str: tipo de clase o None si no se puede detectar
+        """
+        day_of_week = class_date.weekday() + 1  # 1=Lunes
+        hour = class_date.hour
+        minute = class_date.minute
+        time_str = f"{hour:02d}:{minute:02d}"
+
+        # Buscar coincidencia en horarios
+        for tipo, horario in self.horarios.items():
+            if day_of_week in horario['dias'] and horario['hora'] == time_str:
+                return tipo
+
+        return None

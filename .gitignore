@@ -56,3 +56,9 @@ ngrok
 conversation_log.txt
 lead_log.txt
 .pytest_cache/
+
+# Celery Beat schedule (runtime data - regenerated automatically)
+celerybeat-schedule
+celerybeat-schedule.db
+celerybeat-schedule-shm
+celerybeat-schedule-wal

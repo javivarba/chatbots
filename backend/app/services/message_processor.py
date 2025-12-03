@@ -152,6 +152,20 @@ class MessageProcessor:
         # Obtener historial para detección de intenciones
         history = self.conversation_manager.get_history(conversation_id, limit=5)
 
+        # NUEVO: Detectar consulta de reserva ANTES de generar respuesta del AI
+        if self.scheduler and self.intent_detector.detect_booking_query(message):
+            logger.info("[BOOKING_QUERY] Detectada consulta de reserva")
+
+            booking_info = self.scheduler.get_lead_booking(lead_id)
+
+            if booking_info['has_booking']:
+                logger.info("[BOOKING_QUERY] Lead tiene reserva, mostrando información")
+                return booking_info['message']
+            else:
+                logger.info("[BOOKING_QUERY] Lead NO tiene reserva")
+                # Continuar con generación normal del AI para responder apropiadamente
+                # El AI puede ofrecer agendar una clase
+
         # Generar respuesta con OpenAI
         try:
             logger.info("[AI] Generando respuesta con OpenAI")
@@ -172,6 +186,22 @@ class MessageProcessor:
 
             if booking_detected and self.scheduler:
                 logger.info("[BOOKING] Intención de agendamiento detectada")
+
+                # NUEVO: Verificar que el AI no haya rechazado la solicitud
+                ai_rejected = self._detect_ai_rejection(ai_response)
+
+                if ai_rejected:
+                    logger.info("[BOOKING] AI rechazó la solicitud - NO se agenda automáticamente")
+                    logger.info(f"[BOOKING] Razón del rechazo detectada en la respuesta del AI")
+                    return ai_response  # Retornar solo la respuesta del AI sin intentar agendar
+
+                # NUEVO: Verificar si el AI está pidiendo datos del usuario
+                ai_requesting_data = self._detect_ai_requesting_data(ai_response)
+
+                if ai_requesting_data:
+                    logger.info("[BOOKING] AI está pidiendo datos - NO se agenda automáticamente todavía")
+                    logger.info(f"[BOOKING] Esperando que el usuario proporcione: nombre, teléfono, edad")
+                    return ai_response  # Retornar solo la respuesta del AI sin intentar agendar
 
                 # Combinar últimos mensajes del usuario para detectar contexto (ej: "sobrino", "hijo", etc.)
                 recent_user_messages = [msg['content'] for msg in history[-5:] if msg.get('sender') == 'user']
@@ -201,6 +231,20 @@ class MessageProcessor:
                         else:
                             # Otro tipo de error
                             return f"Disculpá, hubo un problema al agendar: {result['message']}"
+
+                # NUEVO: Manejar errores de validación de fecha
+                elif 'error_type' in parsed:
+                    logger.warning(f"[BOOKING] Validación falló: {parsed['error_type']}")
+
+                    # Construir mensaje de error amigable con fecha sugerida
+                    error_msg = parsed['error_message']
+
+                    if parsed.get('suggested_date_formatted'):
+                        error_msg += f" ¿Te parece {parsed['suggested_date_formatted']}?"
+
+                    logger.info(f"[BOOKING] Mensaje de validación: {error_msg}")
+                    return error_msg
+
                 else:
                     logger.info("[BOOKING] No se pudo parsear fecha/hora")
 
@@ -224,6 +268,88 @@ class MessageProcessor:
             "💬 O decime tu nombre y número, y te llamamos\n\n"
             "¡Queremos ayudarte a empezar tu SEMANA DE PRUEBA GRATIS! 🥋"
         )
+
+    def _detect_ai_rejection(self, ai_response: str) -> bool:
+        """
+        Detecta si el AI rechazó la solicitud de agendamiento
+
+        Busca frases clave que indican que el AI está informando al usuario
+        que no es posible agendar para la fecha/hora solicitada.
+
+        Args:
+            ai_response: Respuesta generada por el AI
+
+        Returns:
+            True si el AI rechazó la solicitud, False en caso contrario
+        """
+        response_lower = ai_response.lower()
+
+        # Frases de rechazo que indican que el AI está diciendo "no"
+        rejection_phrases = [
+            'lamentablemente',
+            'no tenemos',
+            'no hay',
+            'no es posible',
+            'disculpá',
+            'ese día no',
+            'esa hora no',
+            'no podemos',
+            'no alcanza',
+            'ya no alcanza',
+            'no alcanzamos',
+            'no está disponible',
+            'no disponible',
+            'ese horario no',
+            'solo tenemos',  # "solo tenemos X días" implica rechazo del día solicitado
+            'únicamente',
+            'solamente',
+        ]
+
+        # Verificar si alguna frase de rechazo está presente
+        for phrase in rejection_phrases:
+            if phrase in response_lower:
+                logger.info(f"[REJECTION] Frase de rechazo detectada: '{phrase}'")
+                return True
+
+        return False
+
+    def _detect_ai_requesting_data(self, ai_response: str) -> bool:
+        """
+        Detectar si el AI esta pidiendo datos del usuario
+        (nombre, telefono, edad) para completar la reserva
+
+        Args:
+            ai_response: Respuesta generada por el AI
+
+        Returns:
+            True si el AI esta pidiendo datos
+        """
+        ai_lower = ai_response.lower()
+
+        # Frases que indican que el AI esta pidiendo datos
+        requesting_phrases = [
+            'necesito tu nombre',
+            'necesito nombre',
+            'para confirmar necesito',
+            'para agendar necesito',
+            'nombre completo',
+            'numero de telefono',
+            'tu edad',
+            'cuantos anos',
+            'que edad',
+            'dame tu nombre',
+            'decime tu nombre',
+            'cual es tu nombre',
+            'podrias proporcionar',
+            'me podrias dar'
+        ]
+
+        is_requesting = any(phrase in ai_lower for phrase in requesting_phrases)
+
+        if is_requesting:
+            logger.info(f"[BOOKING] AI esta solicitando datos del usuario - NO agendar todavia")
+
+        return is_requesting
 
     def get_conversation_stats(self, lead_id: int) -> dict:
         """

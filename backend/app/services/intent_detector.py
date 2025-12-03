@@ -28,6 +28,26 @@ class IntentDetector:
         'clase para', 'semana de prueba'
     ]
 
+    # NUEVO: Palabras clave para consulta de reserva
+    BOOKING_QUERY_KEYWORDS = [
+        'qué clase tengo',
+        'que clase tengo',
+        'cuál es mi clase',
+        'cual es mi clase',
+        'mi reserva',
+        'mi agendamiento',
+        'mi clase agendada',
+        'ver mi clase',
+        'ver mi reserva',
+        'tengo clase',
+        'tengo reserva',
+        'tengo agendada',
+        'cuando es mi clase',
+        'cuándo es mi clase',
+        'a qué hora tengo',
+        'a que hora tengo'
+    ]
+
     DAYS_OF_WEEK = [
         'lunes', 'martes', 'miércoles', 'miercoles',
         'jueves', 'viernes', 'sábado', 'sabado',
@@ -61,25 +81,89 @@ class IntentDetector:
         """
         msg = message.strip()
 
+        # Lista de palabras que NO deben estar en un nombre
+        # (indica que probablemente NO es un nombre)
+        invalid_name_words = [
+            # Grados/Rangos de BJJ
+            'cinta', 'blanca', 'azul', 'morada', 'marrón', 'marron', 'negra',
+            'blanco', 'morado', 'negro',
+            # Verbos comunes
+            'entrenando', 'mudé', 'mude', 'mudado', 'viviendo', 'trabajando',
+            'buscando', 'interesado', 'interesada',
+            # Lugares
+            'santo', 'domingo', 'heredia', 'san', 'jose',
+            # Contexto de conversación
+            'pero', 'porque', 'entonces', 'cuando', 'donde', 'dónde', 'cuándo',
+            # Información personal que no es nombre
+            'años', 'edad', 'teléfono', 'telefono', 'numero', 'número',
+            # Relaciones familiares
+            'papá', 'papa', 'mamá', 'mama', 'hijo', 'hija', 'hermano', 'hermana',
+            'abuelo', 'abuela', 'tío', 'tio', 'tía', 'tia', 'primo', 'prima',
+            'sobrino', 'sobrina', 'nieto', 'nieta', 'padre', 'madre', 'esposo', 'esposa',
+            # Artículos y conectores (también capturados por validación 3)
+            'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas',
+            # Respuestas comunes
+            'hola', 'si', 'sí', 'no', 'bueno', 'ok', 'gracias', 'bien', 'claro',
+            # Artes marciales
+            'jiujitsu', 'jiu', 'jitsu', 'bjj', 'striking', 'karate', 'judo'
+        ]
+
         # Patrón 1: "Mi nombre es Juan" o "Me llamo Juan" o "Soy Juan"
+        # Modificado para NO capturar después de conectores (y, pero, de, que, con)
+        # Acepta: fin de línea, conector + espacio, o puntuación
         patterns = [
-            r'(?:mi nombre es|me llamo|soy)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)',
-            r'(?:nombre:?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)',
+            r'(?:mi nombre es|me llamo|soy)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)(?:$|\s+(?:y|pero|de|que|con|para|por)\s|[,.])',
+            r'(?:nombre:?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)(?:$|\s+(?:y|pero|de|que|con|para|por)\s|[,.])',
         ]
 
         for pattern in patterns:
             match = re.search(pattern, msg, re.IGNORECASE)
             if match:
                 name = match.group(1).strip()
-                # Verificar que no sea una palabra común
-                if name.lower() not in ['hola', 'si', 'no', 'bueno', 'ok', 'gracias']:
-                    logger.info(f"[INTENT] Nombre detectado (patrón): {name}")
-                    return name
+
+                # Validación 1: Máximo 4 palabras (nombre + apellidos)
+                words = name.split()
+                if len(words) > 4:
+                    logger.debug(f"[INTENT] Nombre rechazado (demasiadas palabras): {name}")
+                    continue
+
+                # Validación 2: Verificar que no contenga palabras inválidas (COMPLETAS)
+                # Dividir en palabras para evitar falsos positivos (ej: "Carlos" contiene "los")
+                name_words = [w.lower() for w in name.split()]
+                has_invalid_word = any(
+                    word in invalid_name_words
+                    for word in name_words
+                )
+
+                if has_invalid_word:
+                    logger.debug(f"[INTENT] Nombre rechazado (contiene palabra inválida): {name}")
+                    continue
+
+                # Validación 3: Verificar que no sean solo artículos/conectores
+                if name.lower() in ['el', 'la', 'los', 'las', 'de', 'del', 'y']:
+                    logger.debug(f"[INTENT] Nombre rechazado (artículo/conector): {name}")
+                    continue
+
+                # ✅ Validaciones pasadas - es un nombre válido
+                logger.info(f"[INTENT] Nombre detectado (patrón): {name}")
+                return name
 
         # Patrón 2: Solo un nombre (2 palabras capitalizadas, probablemente nombre y apellido)
         if re.match(r'^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+$', msg):
-            logger.info(f"[INTENT] Nombre detectado (nombre completo): {msg.strip()}")
-            return msg.strip()
+            name = msg.strip()
+
+            # Aplicar las mismas validaciones (palabras COMPLETAS)
+            name_words = [w.lower() for w in name.split()]
+            has_invalid_word = any(
+                word in invalid_name_words
+                for word in name_words
+            )
+
+            if not has_invalid_word:
+                logger.info(f"[INTENT] Nombre detectado (nombre completo): {name}")
+                return name
+            else:
+                logger.debug(f"[INTENT] Nombre completo rechazado (palabra inválida): {name}")
 
         return None
 
@@ -128,18 +212,26 @@ class IntentDetector:
                     discussing_booking = True
                     break
 
-        # Lógica de detección
+        # 6. Verificar si esta proporcionando datos personales (edad, telefono)
+        has_age = bool(re.search(r'\b\d{1,2}\s*anos?\b', msg_lower))
+        has_phone = bool(re.search(r'\b\d{8,10}\b', msg_lower))  # 8-10 digitos consecutivos
+
+        # Logica de deteccion
         if has_booking_keyword and has_day and has_time:
-            logger.info("[INTENT] Intención de agendamiento detectada (keyword + día + hora)")
+            logger.info("[INTENT] Intencion de agendamiento detectada (keyword + dia + hora)")
             return True
         elif has_day and has_time and discussing_booking:
-            logger.info("[INTENT] Intención de agendamiento detectada (día + hora + contexto)")
+            logger.info("[INTENT] Intencion de agendamiento detectada (dia + hora + contexto)")
             return True
         elif name_pattern and has_day and has_time:
-            logger.info("[INTENT] Intención de agendamiento detectada (nombre + día + hora)")
+            logger.info("[INTENT] Intencion de agendamiento detectada (nombre + dia + hora)")
             return True
         elif name_pattern and discussing_booking:
-            logger.info("[INTENT] Intención de agendamiento detectada (nombre + contexto)")
+            logger.info("[INTENT] Intencion de agendamiento detectada (nombre + contexto)")
+            return True
+        elif (has_age or has_phone) and discussing_booking:
+            # NUEVO: Usuario proporciona datos finales (edad/telefono) en contexto de agendamiento
+            logger.info("[INTENT] Intencion de agendamiento detectada (datos personales + contexto)")
             return True
 
         return False
@@ -307,3 +399,23 @@ class IntentDetector:
                     return age
 
         return None
+
+    def detect_booking_query(self, message: str) -> bool:
+        """
+        Detectar si el usuario está consultando su reserva actual
+
+        Args:
+            message: Mensaje del usuario
+
+        Returns:
+            True si está consultando su reserva, False en caso contrario
+        """
+        msg_lower = message.lower()
+
+        # Verificar si alguna frase de consulta está presente
+        for keyword in self.BOOKING_QUERY_KEYWORDS:
+            if keyword in msg_lower:
+                logger.info(f"[INTENT] Consulta de reserva detectada: '{keyword}'")
+                return True
+
+        return False

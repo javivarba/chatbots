@@ -77,21 +77,33 @@ class ReminderService:
         Returns:
             Dict con success y lista de recordatorios creados
         """
+        logger.info(f"[REMINDER_SERVICE] Iniciando programación de recordatorios")
+        logger.info(f"   Lead ID: {lead_id}")
+        logger.info(f"   Tipo clase: {clase_tipo}")
+        logger.info(f"   Fecha inicio: {start_date}")
+
         try:
-            # Validar que el lead existe
+            # Validar que el lead exists
             lead = Lead.query.get(lead_id)
             if not lead:
-                logger.error(f"Lead {lead_id} no encontrado")
+                logger.error(f"[REMINDER_SERVICE] ❌ Lead {lead_id} no encontrado en BD")
                 return {'success': False, 'message': 'Lead no encontrado'}
+
+            logger.info(f"[REMINDER_SERVICE] ✅ Lead encontrado: {lead.name} ({lead.phone})")
 
             # Obtener academy_id del lead
             academy_id = lead.academy_id
+            logger.info(f"[REMINDER_SERVICE] Academy ID: {academy_id}")
 
             # Validar tipo de clase
             horario = self.horarios.get(clase_tipo)
             if not horario:
-                logger.error(f"Tipo de clase no válido: {clase_tipo}")
+                logger.error(f"[REMINDER_SERVICE] ❌ Tipo de clase no válido: {clase_tipo}")
                 return {'success': False, 'message': 'Tipo de clase no válido'}
+
+            logger.info(f"[REMINDER_SERVICE] Clase: {horario['nombre']}")
+            logger.info(f"[REMINDER_SERVICE] Días de clase: {[self.dias_nombres[d] for d in horario['dias']]}")
+            logger.info(f"[REMINDER_SERVICE] Horario: {horario['hora']}")
 
             # Convertir start_date a datetime
             if isinstance(start_date, str):
@@ -100,6 +112,7 @@ class ReminderService:
                 start_datetime = start_date
 
             end_datetime = start_datetime + timedelta(days=7)
+            logger.info(f"[REMINDER_SERVICE] Periodo: {start_datetime.strftime('%Y-%m-%d')} a {end_datetime.strftime('%Y-%m-%d')}")
 
             reminders_created = []
 
@@ -141,14 +154,17 @@ class ReminderService:
                         'type': clase_tipo
                     })
 
-                    logger.info(f"Recordatorio creado: {clase_tipo} el {class_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    logger.info(f"[REMINDER_SERVICE] 📅 Recordatorio #{len(reminders_created)}")
+                    logger.info(f"   Clase: {self.dias_nombres[day_of_week]} {class_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    logger.info(f"   Envío programado: {send_at.strftime('%Y-%m-%d %H:%M')}")
 
                 current_date += timedelta(days=1)
 
             # Commit all reminders
             db.session.commit()
 
-            logger.info(f"OK: {len(reminders_created)} recordatorios creados para lead {lead_id}")
+            logger.info(f"[REMINDER_SERVICE] ✅ ÉXITO: {len(reminders_created)} recordatorios creados y guardados en BD")
+            logger.info(f"[REMINDER_SERVICE] Lead: {lead.name} ({lead_id})")
 
             return {
                 'success': True,
@@ -159,9 +175,10 @@ class ReminderService:
 
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Error creando recordatorios: {e}")
+            logger.error(f"[REMINDER_SERVICE] ❌ ERROR creando recordatorios para lead {lead_id}")
+            logger.error(f"[REMINDER_SERVICE] Exception: {str(e)}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
             return {'success': False, 'message': str(e)}
 
     def send_reminder(self, reminder_id):
@@ -174,13 +191,23 @@ class ReminderService:
         Returns:
             Dict con success y mensaje
         """
+        logger.info(f"[REMINDER_SERVICE] 📤 Procesando envío de recordatorio {reminder_id}")
+
         try:
             reminder = ClassReminder.query.get(reminder_id)
 
             if not reminder:
+                logger.error(f"[REMINDER_SERVICE] ❌ Recordatorio {reminder_id} no encontrado en BD")
                 return {'success': False, 'message': 'Recordatorio no encontrado'}
 
+            logger.info(f"[REMINDER_SERVICE] Recordatorio encontrado")
+            logger.info(f"   ID: {reminder.id}")
+            logger.info(f"   Lead ID: {reminder.lead_id}")
+            logger.info(f"   Status: {reminder.status}")
+            logger.info(f"   Clase: {reminder.class_datetime.strftime('%Y-%m-%d %H:%M')}")
+
             if reminder.status != ReminderStatus.PENDING:
+                logger.warning(f"[REMINDER_SERVICE] ⚠️  Recordatorio no está pendiente (status: {reminder.status})")
                 return {
                     'success': False,
                     'message': f'Recordatorio no está pendiente (status: {reminder.status})'
@@ -189,11 +216,14 @@ class ReminderService:
             # Obtener lead
             lead = Lead.query.get(reminder.lead_id)
             if not lead:
+                logger.error(f"[REMINDER_SERVICE] ❌ Lead {reminder.lead_id} no encontrado")
                 reminder.mark_as_failed('Lead no encontrado')
                 return {'success': False, 'message': 'Lead no encontrado'}
 
+            logger.info(f"[REMINDER_SERVICE] Lead: {lead.name} - {lead.phone}")
+
             if not self.notifier:
-                logger.warning("NotificationService no disponible")
+                logger.error("[REMINDER_SERVICE] ❌ NotificationService no disponible")
                 reminder.mark_as_failed('NotificationService no disponible')
                 return {'success': False, 'message': 'Servicio de notificaciones no disponible'}
 
@@ -206,6 +236,11 @@ class ReminderService:
             day_name = self.dias_nombres.get(class_dt.weekday() + 1, class_dt.strftime('%A'))
             date_formatted = class_dt.strftime('%d/%m/%Y')
             time_formatted = class_dt.strftime('%H:%M')
+
+            logger.info(f"[REMINDER_SERVICE] Preparando mensaje de recordatorio")
+            logger.info(f"   Clase: {clase_nombre}")
+            logger.info(f"   Día: {day_name} {date_formatted}")
+            logger.info(f"   Hora: {time_formatted}")
 
             # Mensaje de recordatorio
             mensaje = f"""Recordatorio de Clase!
@@ -229,6 +264,7 @@ Te esperamos!
 Si no podes asistir, avisanos por favor."""
 
             # Enviar notificación
+            logger.info(f"[REMINDER_SERVICE] 📨 Enviando WhatsApp a {lead.phone}...")
             result = self.notifier.send_whatsapp(
                 to=lead.phone,
                 message=mensaje
@@ -237,7 +273,10 @@ Si no podes asistir, avisanos por favor."""
             if result['success']:
                 message_sid = result.get('sid')
                 reminder.mark_as_sent(message_sid)
-                logger.info(f"OK: Recordatorio {reminder_id} enviado a {lead.phone}")
+                logger.info(f"[REMINDER_SERVICE] ✅ ENVIADO EXITOSAMENTE")
+                logger.info(f"   Recordatorio ID: {reminder_id}")
+                logger.info(f"   Lead: {lead.name} ({lead.phone})")
+                logger.info(f"   Message SID: {message_sid}")
                 return {
                     'success': True,
                     'message': 'Recordatorio enviado',
@@ -246,18 +285,22 @@ Si no podes asistir, avisanos por favor."""
             else:
                 error_msg = result.get('message', 'Error desconocido')
                 reminder.mark_as_failed(error_msg)
-                logger.error(f"ERROR: Recordatorio {reminder_id} falló: {error_msg}")
+                logger.error(f"[REMINDER_SERVICE] ❌ FALLO AL ENVIAR")
+                logger.error(f"   Recordatorio ID: {reminder_id}")
+                logger.error(f"   Error: {error_msg}")
                 return result
 
         except Exception as e:
-            logger.error(f"Error enviando recordatorio {reminder_id}: {e}")
+            logger.error(f"[REMINDER_SERVICE] ❌ EXCEPCIÓN enviando recordatorio {reminder_id}")
+            logger.error(f"[REMINDER_SERVICE] Exception: {str(e)}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
 
             try:
                 reminder = ClassReminder.query.get(reminder_id)
                 if reminder:
                     reminder.mark_as_failed(str(e))
+                    logger.info(f"[REMINDER_SERVICE] Recordatorio {reminder_id} marcado como FAILED")
             except:
                 pass
 
