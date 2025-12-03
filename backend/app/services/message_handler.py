@@ -1,8 +1,29 @@
 """
-Message Handler UNIFICADO con prioridad ABSOLUTA a OpenAI
-Actualizado para BJJ Mingo con voseo costarricense
-MIGRADO A SQLALCHEMY + POSTGRESQL
+⚠️ DEPRECATED - USE MessageProcessor INSTEAD ⚠️
+
+Este archivo está DEPRECATED y se mantiene solo por compatibilidad con tests antiguos.
+
+NUEVA IMPLEMENTACIÓN: app/services/message_processor.py
+
+MessageProcessor es el nuevo orquestador que:
+- Usa la misma arquitectura (LeadManager, ConversationManager, IntentDetector, AIService)
+- Tiene mejor separación de responsabilidades
+- Es más fácil de mantener y testear
+- Incluye todos los fixes más recientes
+
+MIGRACIÓN COMPLETADA: 24/11/2025
+- app/__init__.py ahora usa MessageProcessor
+- Todos los nuevos desarrollos deben usar MessageProcessor
+
+Este archivo se mantendrá hasta que todos los tests se migren.
 """
+
+import warnings
+warnings.warn(
+    "MessageHandler está deprecated. Usar MessageProcessor en su lugar.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import os
 import logging
@@ -10,6 +31,12 @@ from datetime import datetime
 from dotenv import load_dotenv
 from app import db
 from app.models import Academy, Lead, Conversation, Message, MessageDirection, LeadStatus
+from app.services.cache_service import cache
+
+# Importar clases especializadas
+from app.services.lead_manager import LeadManager
+from app.services.conversation_manager import ConversationManager
+from app.services.intent_detector import IntentDetector
 
 # Cargar variables de entorno
 load_dotenv(override=True)
@@ -30,11 +57,18 @@ class MessageHandler:
     """
     Handler unificado que PRIORIZA OpenAI sobre todo
     Actualizado para BJJ Mingo - PostgreSQL + SQLAlchemy
+    REFACTORIZADO: Usa clases especializadas para cada responsabilidad
     """
 
     def __init__(self):
         self.openai_client = None
         self.ai_enabled = False
+
+        # Inicializar clases especializadas (inyección de dependencias)
+        self.lead_manager = LeadManager()
+        self.conversation_manager = ConversationManager()
+        self.intent_detector = IntentDetector()
+        logger.info("✅ Managers especializados inicializados (LeadManager, ConversationManager, IntentDetector)")
 
         # Intentar inicializar OpenAI
         self._initialize_openai()
@@ -92,6 +126,7 @@ class MessageHandler:
     def process_message(self, phone_number, message, name=None):
         """
         Procesar mensaje - SIEMPRE intenta IA primero
+        REFACTORIZADO: Usa managers especializados
         """
         logger.info(f"\n{'='*60}")
         logger.info(f"[PROCESS] Nuevo mensaje de {phone_number}")
@@ -99,29 +134,29 @@ class MessageHandler:
         logger.info(f"[PROCESS] Nombre del perfil: {name}")
         logger.info(f"{'='*60}")
 
-        # 1. Obtener o crear lead
-        lead_id = self._get_or_create_lead(phone_number, name)
+        # 1. Obtener o crear lead (usando LeadManager)
+        lead_id = self.lead_manager.get_or_create(phone_number, name)
 
-        # 2. Detectar si el usuario proporcionó su nombre en el mensaje
-        detected_name = self._detect_name_in_message(message)
+        # 2. Detectar si el usuario proporcionó su nombre en el mensaje (usando IntentDetector)
+        detected_name = self.intent_detector.detect_name(message)
         if detected_name:
             logger.info(f"[NAME_DETECTION] Nombre detectado en mensaje: {detected_name}")
-            self._update_lead_name(lead_id, detected_name)
+            self.lead_manager.update_name(lead_id, detected_name)
 
-        # 3. Obtener o crear conversación
-        conv_id = self._get_or_create_conversation(lead_id)
+        # 3. Obtener o crear conversación (usando ConversationManager)
+        conv_id = self.conversation_manager.get_or_create(lead_id)
 
-        # 4. Guardar mensaje del usuario
-        self._save_message(conv_id, MessageDirection.INBOUND, message)
+        # 4. Guardar mensaje del usuario (usando ConversationManager)
+        self.conversation_manager.save_message(conv_id, MessageDirection.INBOUND, message)
 
         # 5. INTENTAR GENERAR RESPUESTA CON IA
         response = self._generate_ai_response(message, lead_id, conv_id)
 
-        # 6. Guardar respuesta del bot
-        self._save_message(conv_id, MessageDirection.OUTBOUND, response)
+        # 6. Guardar respuesta del bot (usando ConversationManager)
+        self.conversation_manager.save_message(conv_id, MessageDirection.OUTBOUND, response)
 
-        # 7. Actualizar lead
-        self._update_lead_status(lead_id, message)
+        # 7. Actualizar lead (usando LeadManager)
+        self.lead_manager.update_status(lead_id, message)
 
         logger.info(f"[PROCESS] Respuesta generada: {response[:100]}...")
         logger.info(f"{'='*60}\n")
@@ -131,6 +166,7 @@ class MessageHandler:
     def _generate_ai_response(self, message, lead_id, conv_id):
         """
         Genera respuesta PRIORIZANDO IA + detección de agendamiento
+        REFACTORIZADO: Usa managers especializados
         """
 
         # PRIORIDAD 1: Intentar con OpenAI
@@ -138,10 +174,10 @@ class MessageHandler:
             try:
                 logger.info("[DEBUG] Usando OpenAI para generar respuesta")
 
-                # Obtener información del lead y academia
-                lead_info = self._get_lead_info(lead_id)
-                academy_info = self._get_academy_info()
-                history = self._get_conversation_history(conv_id, limit=5)
+                # Obtener información del lead y academia (usando managers)
+                lead_info = self.lead_manager.get_info(lead_id)
+                academy_info = self.conversation_manager.get_academy_info()
+                history = self.conversation_manager.get_history(conv_id, limit=5)
 
                 logger.info(f"[DEBUG] Lead: {lead_info['name']}, Conv ID: {conv_id}")
 
@@ -171,14 +207,20 @@ class MessageHandler:
 
                 logger.info(f"[SUCCESS] Respuesta generada: {len(ai_response)} caracteres")
 
-                # DETECTAR INTENCIÓN DE AGENDAMIENTO
-                booking_detected = self._detect_booking_intent(message, ai_response, history)
+                # DETECTAR INTENCIÓN DE AGENDAMIENTO (usando IntentDetector)
+                booking_detected = self.intent_detector.detect_booking_intent(message, ai_response, history)
 
                 if booking_detected and self.scheduler:
                     logger.info("[BOOKING] Intención de agendamiento detectada")
 
-                    # Intentar parsear la fecha/hora del mensaje
-                    parsed = self.scheduler.parse_appointment_request(message, lead_id)
+                    # Combinar últimos mensajes del usuario para detectar contexto (ej: "sobrino", "hijo", etc.)
+                    recent_user_messages = [msg['content'] for msg in history[-5:] if msg['sender'] == 'user']
+                    combined_context = ' '.join(recent_user_messages) + ' ' + message
+
+                    logger.info(f"[BOOKING] Contexto combinado para parseo: {combined_context[:100]}...")
+
+                    # Intentar parsear la fecha/hora del mensaje con contexto de conversación
+                    parsed = self.scheduler.parse_appointment_request(combined_context, lead_id)
 
                     if parsed['parsed']:
                         # Crear la semana de prueba
@@ -193,6 +235,12 @@ class MessageHandler:
                             return ai_response + "\n\n" + result['message']
                         else:
                             logger.warning(f"[BOOKING] Error: {result['message']}")
+                            # Si ya tiene una reserva activa, informar al usuario
+                            if 'Ya tenés una semana de prueba activa' in result['message']:
+                                return "Ya tenés una clase de prueba agendada. Si necesitás modificar tu reserva, por favor avisame."
+                            else:
+                                # Otro tipo de error
+                                return f"Disculpá, hubo un problema al agendar: {result['message']}"
                     else:
                         logger.info("[BOOKING] No se pudo parsear fecha/hora")
 
@@ -206,51 +254,6 @@ class MessageHandler:
         # FALLBACK: Solo si OpenAI falló o no está disponible
         logger.warning("[FALLBACK] OpenAI no disponible, usando respuesta de emergencia")
         return self._get_emergency_response(message)
-
-    def _detect_booking_intent(self, user_message, ai_response, history):
-        """
-        Detecta si el usuario está intentando agendar una clase
-        """
-        msg_lower = user_message.lower()
-
-        # Palabras clave de agendamiento
-        booking_keywords = ['agendar', 'reservar', 'apartar', 'quiero clase', 'mi nombre es',
-                           'quiero una clase', 'clase el', 'clase para', 'semana de prueba']
-        has_booking_keyword = any(word in msg_lower for word in booking_keywords)
-
-        # Verificar si tiene día de la semana
-        days = ['lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes',
-                'sábado', 'sabado', 'mañana', 'hoy']
-        has_day = any(day in msg_lower for day in days)
-
-        # Verificar si tiene hora
-        import re
-        has_time = bool(re.search(r'\d{1,2}:?\d{0,2}\s?(am|pm|hrs)?', msg_lower))
-
-        # Verificar si respondió con nombre (formato: "Nombre Apellido")
-        name_pattern = bool(re.search(r'\b[A-Z][a-z]+\s+[A-Z][a-z]+', user_message))
-
-        # Verificar en historial si ya se estaba hablando de agendamiento
-        discussing_booking = False
-        if history:
-            for msg in history[-5:]:
-                content_lower = msg['content'].lower()
-                if any(word in content_lower for word in ['agendar', 'reservar', 'semana de prueba',
-                                                           'horario', 'clase para']):
-                    discussing_booking = True
-                    break
-
-        # Lógica de detección
-        if has_booking_keyword and has_day and has_time:
-            return True
-        elif has_day and has_time and discussing_booking:
-            return True
-        elif name_pattern and has_day and has_time:
-            return True
-        elif name_pattern and discussing_booking:
-            return True
-
-        return False
 
     def _build_system_prompt(self, academy_info, lead_info):
         """Construir prompt del sistema usando academy_info.py"""
@@ -313,211 +316,15 @@ INSTRUCCIONES:
             "¡Queremos ayudarte a empezar tu SEMANA DE PRUEBA GRATIS! 🥋"
         )
 
-    # ========== MÉTODOS AUXILIARES ==========
-
-    def _detect_name_in_message(self, message):
-        """
-        Detecta si el usuario proporcionó su nombre en el mensaje
-        Patrones: 'Mi nombre es...', 'Me llamo...', 'Soy...', o solo el nombre
-        """
-        import re
-
-        msg = message.strip()
-
-        # Patrón 1: "Mi nombre es Juan" o "Me llamo Juan"
-        patterns = [
-            r'(?:mi nombre es|me llamo|soy)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)',
-            r'(?:nombre:?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, msg, re.IGNORECASE)
-            if match:
-                name = match.group(1).strip()
-                # Verificar que no sea una palabra común
-                if name.lower() not in ['hola', 'si', 'no', 'bueno', 'ok', 'gracias']:
-                    return name
-
-        # Patrón 2: Solo un nombre (2 palabras capitalizadas, probablemente nombre y apellido)
-        if re.match(r'^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+$', msg):
-            return msg.strip()
-
-        return None
-
-    def _update_lead_name(self, lead_id, new_name):
-        """Actualiza el nombre del lead si es diferente"""
-        lead = Lead.query.get(lead_id)
-        if lead and new_name:
-            old_name = lead.name
-            if old_name != new_name and old_name in ['WhatsApp User', 'Usuario', None, '']:
-                logger.info(f"[UPDATE] Cambiando nombre de '{old_name}' a '{new_name}' para lead_id: {lead_id}")
-                lead.name = new_name
-                db.session.commit()
-            elif old_name != new_name:
-                logger.info(f"[UPDATE] Lead ya tiene nombre '{old_name}', detectado '{new_name}' - no se actualiza")
-
-    # ========== MÉTODOS DE BASE DE DATOS (SQLAlchemy) ==========
-
-    def _get_or_create_lead(self, phone_number, name=None):
-        """Obtener o crear lead usando SQLAlchemy"""
-        # Normalizar teléfono (ya viene normalizado del webhook, pero por si acaso)
-        import re
-        normalized_phone = re.sub(r'[^\d+]', '', phone_number)
-
-        logger.info(f"[LEAD] Buscando lead con teléfono: {normalized_phone}")
-        lead = Lead.query.filter_by(phone=normalized_phone).first()
-
-        if not lead:
-            logger.info(f"[LEAD] No encontrado. Creando nuevo lead con nombre: {name}")
-            # Obtener primera academy
-            academy = Academy.query.first()
-            if not academy:
-                raise Exception("No hay academy configurada en la base de datos")
-
-            lead = Lead(
-                academy_id=academy.id,
-                phone=normalized_phone,
-                name=name or 'WhatsApp User',
-                source='whatsapp',
-                status=LeadStatus.NEW,
-                lead_score=5,
-                created_at=datetime.now()
-            )
-            db.session.add(lead)
-            db.session.commit()
-            logger.info(f"[LEAD] Nuevo lead creado - ID: {lead.id}, Nombre: {lead.name}")
-        else:
-            logger.info(f"[LEAD] Lead encontrado - ID: {lead.id}, Nombre actual: {lead.name}")
-            # Si el lead existe pero tiene nombre genérico y ahora tenemos un nombre real, actualizarlo
-            if name and name != '' and lead.name in ['WhatsApp User', 'Usuario', None]:
-                logger.info(f"[LEAD] Actualizando nombre genérico '{lead.name}' a '{name}'")
-                lead.name = name
-                db.session.commit()
-
-        return lead.id
-
-    def _get_or_create_conversation(self, lead_id):
-        """Obtener o crear conversación usando SQLAlchemy"""
-        logger.info(f"[CONVERSATION] Buscando conversación activa para lead_id: {lead_id}")
-        conversation = Conversation.query.filter_by(
-            lead_id=lead_id,
-            is_active=True
-        ).first()
-
-        if not conversation:
-            logger.info(f"[CONVERSATION] No encontrada. Creando nueva conversación para lead_id: {lead_id}")
-            lead = Lead.query.get(lead_id)
-
-            conversation = Conversation(
-                lead_id=lead_id,
-                academy_id=lead.academy_id,
-                platform='whatsapp',
-                is_active=True,
-                message_count=0,
-                inbound_count=0,
-                outbound_count=0,
-                started_at=datetime.now(),
-                last_message_at=datetime.now()
-            )
-            db.session.add(conversation)
-            db.session.commit()
-            logger.info(f"[CONVERSATION] Nueva conversación creada - ID: {conversation.id}")
-        else:
-            logger.info(f"[CONVERSATION] Conversación encontrada - ID: {conversation.id}, Mensajes: {conversation.message_count}")
-
-        return conversation.id
-
-    def _save_message(self, conv_id, direction, content, intent=None):
-        """Guardar mensaje usando SQLAlchemy"""
-        message = Message(
-            conversation_id=conv_id,
-            direction=direction,
-            content=content,
-            created_at=datetime.now()
-        )
-        db.session.add(message)
-
-        # Actualizar conversation
-        conversation = Conversation.query.get(conv_id)
-        if conversation:
-            conversation.message_count += 1
-            if direction == MessageDirection.INBOUND:
-                conversation.inbound_count += 1
-            else:
-                conversation.outbound_count += 1
-            conversation.last_message_at = datetime.now()
-
-        db.session.commit()
-
-    def _get_lead_info(self, lead_id):
-        """Obtener información del lead usando SQLAlchemy"""
-        lead = Lead.query.get(lead_id)
-
-        if lead:
-            return {
-                'id': lead.id,
-                'phone': lead.phone,
-                'name': lead.name,
-                'status': lead.status,
-                'interest_level': lead.lead_score or 0,
-                'source': lead.source or 'whatsapp'
-            }
-        return {}
-
-    def _get_academy_info(self):
-        """Obtener información de la academia usando SQLAlchemy"""
-        academy = Academy.query.first()
-
-        if academy:
-            return {
-                'name': academy.name,
-                'description': academy.description or 'Academia de Brazilian Jiu-Jitsu',
-                'instructor': academy.instructor_name or 'Instructores certificados',
-                'phone': academy.phone,
-                'location': f"{academy.address_street}, {academy.address_city}" if academy.address_street else 'Santo Domingo de Heredia, Costa Rica'
-            }
-        return {'name': 'BJJ Mingo', 'phone': '+506-8888-8888'}
-
-    def _get_conversation_history(self, conv_id, limit=5):
-        """Obtener historial de conversación usando SQLAlchemy"""
-        logger.info(f"[HISTORY] Obteniendo últimos {limit} mensajes de conversación ID: {conv_id}")
-        messages = Message.query.filter_by(
-            conversation_id=conv_id
-        ).order_by(Message.created_at.desc()).limit(limit).all()
-
-        logger.info(f"[HISTORY] Encontrados {len(messages)} mensajes")
-
-        history = []
-        for msg in messages:
-            sender = 'user' if msg.direction == MessageDirection.INBOUND else 'assistant'
-            history.append({
-                'sender': sender,
-                'content': msg.content,
-                'timestamp': msg.created_at.isoformat() if msg.created_at else None
-            })
-            logger.info(f"[HISTORY] - {sender}: {msg.content[:50]}...")
-
-        # Invertir para orden cronológico
-        history.reverse()
-        return history
-
-    def _update_lead_status(self, lead_id, message):
-        """Actualizar estado del lead usando SQLAlchemy"""
-        msg_lower = message.lower()
-        lead = Lead.query.get(lead_id)
-
-        if not lead:
-            return
-
-        # Si muestra interés en clase
-        if any(word in msg_lower for word in ['agendar', 'clase', 'prueba', 'probar', 'semana']):
-            if lead.status != LeadStatus.SCHEDULED:
-                lead.status = LeadStatus.INTERESTED
-                lead.lead_score = 8
-                lead.last_contact_date = datetime.now()
-                db.session.commit()
-        # Si es primera interacción
-        elif lead.status == LeadStatus.NEW:
-            lead.status = 'contacted'
-            lead.last_contact_date = datetime.now()
-            db.session.commit()
+    # ========== MÉTODOS ELIMINADOS ==========
+    # Los siguientes métodos ahora están implementados en clases especializadas:
+    # - _detect_name_in_message() -> IntentDetector.detect_name()
+    # - _update_lead_name() -> LeadManager.update_name()
+    # - _get_or_create_lead() -> LeadManager.get_or_create()
+    # - _get_or_create_conversation() -> ConversationManager.get_or_create()
+    # - _save_message() -> ConversationManager.save_message()
+    # - _get_lead_info() -> LeadManager.get_info()
+    # - _get_academy_info() -> ConversationManager.get_academy_info()
+    # - _get_conversation_history() -> ConversationManager.get_history()
+    # - _update_lead_status() -> LeadManager.update_status()
+    # - _detect_booking_intent() -> IntentDetector.detect_booking_intent()

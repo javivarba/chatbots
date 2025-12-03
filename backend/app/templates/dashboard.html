@@ -36,13 +36,16 @@
                     <p class="text-sm text-gray-500 mt-1">Gestión de leads y seguimiento</p>
                 </div>
                 <div class="flex gap-3">
-                    <button onclick="toggleFilter('needs_followup')" 
+                    <button onclick="toggleFilter('needs_followup')"
                             id="filter-followup"
                             class="px-4 py-2 rounded border hover:bg-gray-50">
                         🔔 Necesitan seguimiento
                     </button>
                     <button onclick="refreshData()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
                         Actualizar
+                    </button>
+                    <button onclick="logout()" class="px-4 py-2 rounded border border-red-500 text-red-600 hover:bg-red-50">
+                        Cerrar sesión
                     </button>
                 </div>
             </div>
@@ -158,6 +161,42 @@
     </div>
 
     <script>
+        // Verificar autenticación al cargar la página
+        window.addEventListener('load', () => {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                // No hay token, redirigir a login
+                window.location.href = '/login';
+            }
+        });
+
+        // Helper para obtener headers con JWT
+        function getAuthHeaders() {
+            const token = localStorage.getItem('access_token');
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            };
+        }
+
+        // Manejar errores 401 (token expirado o inválido)
+        function handleUnauthorized() {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            localStorage.removeItem('user');
+            window.location.href = '/login';
+        }
+
+        // Logout
+        function logout() {
+            if (confirm('¿Estás seguro de que quieres cerrar sesión?')) {
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem('user');
+                window.location.href = '/login';
+            }
+        }
+
         // Variables globales
         let leadsData = [];
         let statsData = {};
@@ -170,7 +209,15 @@
         // Cargar estadísticas
         async function loadStats() {
             try {
-                const response = await fetch('/api/stats');
+                const response = await fetch('/api/stats', {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.status === 401) {
+                    handleUnauthorized();
+                    return;
+                }
+
                 statsData = await response.json();
                 
                 document.getElementById('stats-container').innerHTML = `
@@ -206,8 +253,16 @@
                 if (currentFilter.needsFollowup) {
                     url += 'needs_followup=true';
                 }
-                
-                const response = await fetch(url);
+
+                const response = await fetch(url, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.status === 401) {
+                    handleUnauthorized();
+                    return;
+                }
+
                 leadsData = await response.json();
                 
                 const tbody = document.getElementById('leads-tbody');
@@ -302,7 +357,15 @@
         async function viewConversation(leadId) {
             try {
                 currentLeadId = leadId;
-                const response = await fetch(`/api/leads/${leadId}`);
+                const response = await fetch(`/api/leads/${leadId}`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.status === 401) {
+                    handleUnauthorized();
+                    return;
+                }
+
                 const data = await response.json();
                 
                 document.getElementById('modal-lead-name').textContent = data.lead.name;
@@ -393,17 +456,20 @@
         async function addQuickNote() {
             const noteInput = document.getElementById('quick-note-input');
             const note = noteInput.value.trim();
-            
+
             if (!note || !currentLeadId) return;
-            
+
             try {
-                await fetch(`/api/leads/${currentLeadId}/add-note`, {
+                const response = await fetch(`/api/leads/${currentLeadId}/add-note`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({ note })
                 });
+
+                if (response.status === 401) {
+                    handleUnauthorized();
+                    return;
+                }
                 
                 noteInput.value = '';
                 viewConversation(currentLeadId); // Recargar conversación
@@ -416,13 +482,16 @@
         // Actualizar status de lead
         async function updateStatus(leadId, newStatus) {
             try {
-                await fetch(`/api/leads/${leadId}/update-status`, {
+                const response = await fetch(`/api/leads/${leadId}/update-status`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({ status: newStatus })
                 });
+
+                if (response.status === 401) {
+                    handleUnauthorized();
+                    return;
+                }
                 
                 // Recargar datos
                 refreshData();

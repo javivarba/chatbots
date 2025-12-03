@@ -52,8 +52,8 @@ class ClassReminder(db.Model):
     notes = db.Column(db.Text)  # Optional notes about this reminder
 
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
     # Indexes for efficient querying
     __table_args__ = (
@@ -70,7 +70,7 @@ class ClassReminder(db.Model):
     def mark_as_sent(self, message_sid=None):
         """Mark reminder as successfully sent"""
         self.status = ReminderStatus.SENT
-        self.sent_at = datetime.utcnow()
+        self.sent_at = datetime.now()
         if message_sid:
             self.message_sid = message_sid
         db.session.commit()
@@ -102,7 +102,7 @@ class ClassReminder(db.Model):
         """Check if reminder should be sent now"""
         if self.status != ReminderStatus.PENDING:
             return False
-        return datetime.utcnow() >= self.send_at
+        return datetime.now() >= self.send_at
 
     @classmethod
     def get_pending_reminders(cls, limit=100):
@@ -117,7 +117,7 @@ class ClassReminder(db.Model):
         """
         return cls.query.filter(
             cls.status == ReminderStatus.PENDING,
-            cls.send_at <= datetime.utcnow()
+            cls.send_at <= datetime.now()
         ).order_by(cls.send_at).limit(limit).all()
 
     @classmethod
@@ -151,10 +151,10 @@ class ClassReminder(db.Model):
         count = cls.query.filter(
             cls.lead_id == lead_id,
             cls.status == ReminderStatus.PENDING,
-            cls.class_datetime > datetime.utcnow()
+            cls.class_datetime > datetime.now()
         ).update({
             'status': ReminderStatus.CANCELLED,
-            'updated_at': datetime.utcnow()
+            'updated_at': datetime.now()
         })
         db.session.commit()
         return count

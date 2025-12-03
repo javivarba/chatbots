@@ -10,11 +10,20 @@ Se configuran retries y health checks para manejar esto.
 """
 
 import os
+import logging
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import (
+    worker_ready, worker_shutdown,
+    beat_init, task_prerun, task_success,
+    task_failure, task_retry
+)
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
+
+# Configurar logging para Celery
+logger = logging.getLogger(__name__)
 
 # Crear instancia de Celery
 celery_app = Celery(
@@ -94,6 +103,96 @@ celery_app.conf.beat_schedule = {
 
 # Auto-descubrir tareas en el módulo app.tasks
 celery_app.autodiscover_tasks(['app.tasks'])
+
+
+# ============================================================
+# SEÑALES DE CELERY PARA LOGGING DETALLADO
+# ============================================================
+
+@worker_ready.connect
+def on_worker_ready(sender=None, **kwargs):
+    """Log cuando el worker está listo para procesar tareas"""
+    logger.info("="*70)
+    logger.info("🚀 CELERY WORKER INICIADO Y LISTO")
+    logger.info("="*70)
+    logger.info(f"Worker: {sender.hostname}")
+    logger.info(f"Redis Broker: {os.getenv('CELERY_BROKER_URL', 'localhost')}")
+    logger.info(f"Timezone: {celery_app.conf.timezone}")
+    logger.info("="*70)
+
+
+@worker_shutdown.connect
+def on_worker_shutdown(sender=None, **kwargs):
+    """Log cuando el worker se apaga"""
+    logger.info("="*70)
+    logger.info("🛑 CELERY WORKER APAGÁNDOSE")
+    logger.info("="*70)
+
+
+@beat_init.connect
+def on_beat_init(sender=None, **kwargs):
+    """Log cuando Celery Beat inicia"""
+    logger.info("="*70)
+    logger.info("⏰ CELERY BEAT INICIADO")
+    logger.info("="*70)
+    logger.info("Tareas programadas:")
+    for task_name, schedule_info in celery_app.conf.beat_schedule.items():
+        logger.info(f"  • {task_name}")
+        logger.info(f"    Tarea: {schedule_info['task']}")
+        logger.info(f"    Schedule: {schedule_info['schedule']}")
+    logger.info("="*70)
+
+
+@task_prerun.connect
+def on_task_prerun(sender=None, task_id=None, task=None, args=None, kwargs=None, **extra):
+    """Log antes de ejecutar una tarea"""
+    logger.info("─"*70)
+    logger.info(f"▶️  INICIANDO TAREA: {task.name}")
+    logger.info(f"   Task ID: {task_id}")
+    if args:
+        logger.info(f"   Args: {args}")
+    if kwargs:
+        logger.info(f"   Kwargs: {kwargs}")
+    logger.info("─"*70)
+
+
+@task_success.connect
+def on_task_success(sender=None, result=None, **kwargs):
+    """Log cuando una tarea termina exitosamente"""
+    task_name = sender.name if sender else 'unknown'
+    logger.info("─"*70)
+    logger.info(f"✅ TAREA COMPLETADA: {task_name}")
+    if isinstance(result, dict):
+        for key, value in result.items():
+            logger.info(f"   {key}: {value}")
+    else:
+        logger.info(f"   Result: {result}")
+    logger.info("─"*70)
+
+
+@task_failure.connect
+def on_task_failure(sender=None, task_id=None, exception=None, traceback=None, **kwargs):
+    """Log cuando una tarea falla"""
+    task_name = sender.name if sender else 'unknown'
+    logger.error("─"*70)
+    logger.error(f"❌ TAREA FALLIDA: {task_name}")
+    logger.error(f"   Task ID: {task_id}")
+    logger.error(f"   Exception: {exception}")
+    if traceback:
+        logger.error(f"   Traceback: {traceback}")
+    logger.error("─"*70)
+
+
+@task_retry.connect
+def on_task_retry(sender=None, task_id=None, reason=None, einfo=None, **kwargs):
+    """Log cuando una tarea se reintenta"""
+    task_name = sender.name if sender else 'unknown'
+    logger.warning("─"*70)
+    logger.warning(f"🔄 TAREA REINTENTANDO: {task_name}")
+    logger.warning(f"   Task ID: {task_id}")
+    logger.warning(f"   Razón: {reason}")
+    logger.warning("─"*70)
+
 
 if __name__ == '__main__':
     celery_app.start()
